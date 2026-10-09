@@ -1,0 +1,201 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "scope": {
+    "base": "bff39a560ccb98cd8ed5e256fec450b80e8a5afd",
+    "branch": "feat/wallz-adviser",
+    "head_sha": "bff39a560ccb98cd8ed5e256fec450b80e8a5afd",
+    "pr_url": null,
+    "files_changed": 19
+  },
+  "intent": "Deliver a local Chrome/Edge overlay that reads committed Wallz board state and recommends legal pawn moves and walls for manual practice, hot-seat and private friend games. Search must be bounded, keep the page responsive, and invalidate advice when state changes; joining and submitting moves remain manual.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "testing",
+    "maintainability",
+    "security",
+    "performance",
+    "reliability",
+    "adversarial",
+    "julik-frontend-races"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "The active synchronous search finishes within its selected budget before queued messages are processed. Latest advice can wait for the remainder of that budget plus its own search; this documented latency is distinct from the rejected backlog claim.",
+    "The reader depends on committed React fiber and Wallz board metadata. A site update may require a reader update; unrecognised positions currently fail closed with an error.",
+    "Deeper wall search is selective and can miss long-term setups. The small local benchmark is a sanity check, not an Elo estimate or proof of optimal play."
+  ],
+  "testing_gaps": [
+    "No live smoke or deterministic fixture exercises extension/bridge.js:35,42 hot-seat classification and player/orientation changes across hot-seat turns, although README.md lists that mode as supported.",
+    "The native worker burst reproduction uses a synthetic 250ms synchronous analysis. Current-state latency during a real Deep search in a Chromium Manifest V3 worker remains unmeasured.",
+    "Edge compatibility is inferred from Chromium extension support and has not been separately tested."
+  ],
+  "coverage": {
+    "depth": "full",
+    "scope_mode": "standalone",
+    "mode": "agent",
+    "apply_local": false,
+    "notes": [
+      "Reviewed the current canonical Downloads working tree against the empty baseline, including staged fixes, coalescer tests and deterministic browser fixtures; the full diff was refreshed for finishing.",
+      "Cross-model pass: not run because the caller explicitly required local-only review; the local adversarial reviewer ran.",
+      "Local reviewer agreement did not promote confidence. Some early reviewer findings refer to a prior staged snapshot; their current disposition was checked against canonical source and evidence.",
+      "Project standards were not assessed because the successful criteria search found no applicable standards files. Settlement suppression was not evaluated because no plan was discovered.",
+      "No findings were suppressed by confidence. Missing-quote demotions, first_evidence backfills, mode-aware demotions and malformed findings/returns were all zero.",
+      "One selected finding was validated in one completed local batch; verdicts landed. Confirmed: 0; rejected: 1; unresolved: 0; malformed: 0; failed: 0; shortcut-skipped: 0.",
+      "The sole concurrency finding #1 was rejected after current-source inspection and native worker-message reproduction: only active request 1 and latest request 4 searched; superseded requests 2 and 3 received errors. No unresolved verification gate remains.",
+      "The report leaf matched the current worker SHA256 to the validator evidence and repeated the discriminating reproduction under bundled Node v24.19.0 with native 50ms timers and a synthetic 250ms blocking search; it passed.",
+      "Current source and deterministic fixtures resolve the old terminal-label and stale-response assertions. The current hover smoke asserts selected/unselected alternatives and unchanged game state; those prior claims are not outstanding findings.",
+      "Current reader fixtures exclude ranked/public state, and overlay fixtures reject a pending ranked-mode result. The earlier mode-gating coverage gap is resolved.",
+      "On-disk final live smoke passes all 10 assertions and deterministic browser fixtures pass all 8. Caller reports all 18 unit tests plus syntax/manifest checks pass.",
+      "All eight selected local reviewers returned; later batches ran sequentially because of the active-agent cap. No reviewer failure or timeout is recorded.",
+      "This report applied no production change, commit, push, PR creation or publication. Caller fixes are reviewed changes, not fixes applied by the review leaf."
+    ],
+    "reviewer_selection": [
+      {
+        "reviewer": "correctness",
+        "tier": "session",
+        "reason": "always-on"
+      },
+      {
+        "reviewer": "testing",
+        "tier": "mid",
+        "reason": "new tests and browser harness"
+      },
+      {
+        "reviewer": "maintainability",
+        "tier": "mid",
+        "reason": "802 executable changed lines and new module boundaries"
+      },
+      {
+        "reviewer": "security",
+        "tier": "session",
+        "reason": "page messages and mode gates"
+      },
+      {
+        "reviewer": "performance",
+        "tier": "mid",
+        "reason": "bounded game-tree search and graph cache"
+      },
+      {
+        "reviewer": "reliability",
+        "tier": "mid",
+        "reason": "service-worker request and error paths"
+      },
+      {
+        "reviewer": "adversarial",
+        "tier": "session",
+        "reason": "cross-component state transitions and guard fidelity"
+      },
+      {
+        "reviewer": "julik-frontend-races",
+        "tier": "mid",
+        "reason": "polling, DOM events and in-flight state changes"
+      }
+    ],
+    "standards": {
+      "criteria": [],
+      "fallback_named": false,
+      "not_run_reason": "No applicable standards files found by successful criteria search."
+    },
+    "compound_packs": {
+      "roots": [],
+      "warnings": [],
+      "errors": []
+    },
+    "cross_model": {
+      "outcome": "in-process-fallback",
+      "independence_verified": false,
+      "coverage": "Cross-model pass: not run because the caller explicitly required local-only review; the local adversarial reviewer ran."
+    },
+    "suppressed_by_confidence": {},
+    "first_evidence_backfilled": 0,
+    "missing_quote_demotions": 0,
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "mode_aware_demotions": 0,
+    "validator": {
+      "outcome": "verdicts",
+      "selected": 1,
+      "confirmed": 0,
+      "rejected": 1,
+      "unresolved": 0,
+      "malformed": 0,
+      "failed": 0,
+      "shortcut_skipped": 0,
+      "protected_subject_reclassifications": 0,
+      "results": [
+        {
+          "#": 1,
+          "status": "rejected",
+          "protected_subject": "concurrency",
+          "reason": "The backlog claim requires multiple same-tab requests queued during an active search, but extension/background.js:12-25 cancels each previous waiting timer and replaces its job, and a read-only reproduction of current staged revision bff39a5 (background SHA256 5bb6fced29e1e08e5762854fd4bea881ff35d16ab708852a312a55a312219e99) under Node v24.19.0 with native worker messages and 50ms timers submitted requests 2/3/4 during a 250ms synchronous request 1 and passed assertions that only requests 1/4 were analysed while 2/3 received Superseded errors, refuting the reported burst backlog while retaining the explicitly separate bounded active-search delay."
+        }
+      ]
+    },
+    "rejected_prior_snapshot_claims": [
+      {
+        "title": "Forced losses are labelled as winning lines",
+        "reason": "Resolved in current source: extension/overlay.js:114 has separate score>=900 and score<=-900 labels. scripts/browser-fixtures.cjs asserts both terminal signs; work/browser-evidence/fixtures.json reports both passing."
+      },
+      {
+        "title": "Movement smoke accepts stale recommendations",
+        "reason": "The broad smoke wait remains, but scripts/browser-fixtures.cjs independently posts a newer board, resolves the older response, asserts zero candidates and pending status, then resolves the new response and asserts Move to e5. Current overlay.js:134 rejects obsolete IDs; the alleged material absence of stale-response verification is resolved."
+      },
+      {
+        "title": "Hover smoke never checks highlighting or game state",
+        "reason": "Current scripts/browser-smoke.cjs:48-50 asserts candidate 2 selected, candidate 1 unselected, and the captured game state unchanged after hover; overlay.js:116 calls draw from that selection handler."
+      }
+    ],
+    "verification": {
+      "live_smoke": {
+        "status": "PASS",
+        "assertions": 10,
+        "checked_at": "2026-10-09T22:46:04.297Z",
+        "evidence": "docs/browser-smoke.json"
+      },
+      "deterministic_fixtures": {
+        "status": "PASS",
+        "assertions": 8,
+        "checked_at": "2026-10-09T22:39:36.153Z",
+        "evidence": "docs/browser-fixtures.json"
+      },
+      "unit_tests": {
+        "source": "caller report",
+        "passed": 18
+      },
+      "syntax_manifest": {
+        "source": "caller report",
+        "status": "PASS"
+      },
+      "native_worker_reproduction": {
+        "status": "PASS",
+        "runtime": "Node v24.19.0",
+        "reviewed_head": "bff39a560ccb98cd8ed5e256fec450b80e8a5afd",
+        "background_sha256": "5bb6fced29e1e08e5762854fd4bea881ff35d16ab708852a312a55a312219e99",
+        "configuration": "Native worker messages, native 50ms timers, one tab, synthetic 250ms synchronous analysis",
+        "trigger": "Requests 2, 3 and 4 submitted while request 1 was running",
+        "searched": [
+          1,
+          4
+        ],
+        "superseded": [
+          2,
+          3
+        ]
+      }
+    },
+    "failed_reviewers": [],
+    "bound_exceeded": []
+  },
+  "artifact_path": "C:/Users/delhu/Downloads/wallz-adviser/work/ce-code-review/review-20261009",
+  "run_id": "review-20261009",
+  "verdict_reason": "No current primary or actionable finding remains. The old label and browser-test claims are resolved, and the current coalescer refutes the obsolete-search backlog claim. Remaining documented latency, hot-seat coverage and browser compatibility limits are informational."
+}

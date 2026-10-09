@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-10-09T22:28:30.600Z",
+  "results": [
+    {
+      "scenario": "opening",
+      "budgetMs": 350,
+      "depth": 4,
+      "nodes": 10692,
+      "elapsedMs": 351,
+      "recommendation": {
+        "type": "pawn",
+        "to": 13
+      }
+    },
+    {
+      "scenario": "opening",
+      "budgetMs": 1200,
+      "depth": 4,
+      "nodes": 21683,
+      "elapsedMs": 1201,
+      "recommendation": {
+        "type": "pawn",
+        "to": 13
+      }
+    },
+    {
+      "scenario": "opening",
+      "budgetMs": 3500,
+      "depth": 5,
+      "nodes": 78481,
+      "elapsedMs": 3503,
+      "recommendation": {
+        "type": "pawn",
+        "to": 13
+      }
+    },
+    {
+      "scenario": "opponent one step from winning",
+      "depth": 4,
+      "recommendation": {
+        "type": "wall",
+        "wall": 0
+      },
+      "blocksImmediateWin": true
+    }
+  ],
+  "baselineMatch": {
+    "baseline": "Shortest-route pawn mover (never places walls)",
+    "games": 8,
+    "engineBudgetMs": 100,
+    "wins": 8,
+    "losses": 0,
+    "unfinished": 0
+  },
+  "limitations": "Small local sanity benchmark. This is not an Elo estimate or evidence of perfect play."
+}

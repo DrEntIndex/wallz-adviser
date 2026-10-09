@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Wallz Adviser",
+  "version": "0.1.0",
+  "description": "Local move and wall suggestions for Wallz practice and private games.",
+  "minimum_chrome_version": "111",
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Show or hide Wallz Adviser" },
+  "content_scripts": [
+    { "matches": ["https://www.wallz.gg/*", "https://wallz.gg/*"], "js": ["bridge.js"], "world": "MAIN", "run_at": "document_idle" },
+    { "matches": ["https://www.wallz.gg/*", "https://wallz.gg/*"], "js": ["rules.js", "overlay.js"], "run_at": "document_idle" }
+  ]
+}
