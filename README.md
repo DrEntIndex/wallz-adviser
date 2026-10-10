@@ -1,6 +1,6 @@
-# Wallz Adviser
+# Wallz Adviser for wallz.gg
 
-A browser extension that highlights a suggested move or wall on the Wallz board, with a faint path to the goal. Analysis runs on your computer.
+A browser extension for [Wallz (wallz.gg)](https://www.wallz.gg/) that highlights a suggested move or wall on the board, with a faint path to the goal. Analysis runs on your computer.
 
 ## Install
 
@@ -8,13 +8,15 @@ A browser extension that highlights a suggested move or wall on the Wallz board,
 2. Open **Chrome** and go to `chrome://extensions`.
 3. Turn on **Developer mode**, then click **Load unpacked**.
 4. Select the **extension** folder inside the extracted project. This is the folder containing `manifest.json`.
-5. Open or refresh Wallz and start a game. Suggestions appear directly on the board.
+5. Open or refresh [wallz.gg](https://www.wallz.gg/) and start a game. Suggestions appear directly on the board.
 
 Keep the extracted folder where it is after installing. You don't need Node, Python, an API key, or a build step.
 
 ## Browsers
 
 Use an up-to-date **desktop Google Chrome** on Windows or macOS. The extension has worked on Windows and has been confirmed working on a Mac. Its manifest requires Chrome 116 or newer.
+
+The extension activates on `wallz.gg` and `www.wallz.gg`.
 
 Brave and Edge use Chromium and may also work, but haven't been separately verified. Use their extensions page to load the same folder. **Safari, Firefox, and mobile browsers aren't supported by this package.**
 
