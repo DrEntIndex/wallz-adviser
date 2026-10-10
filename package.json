@@ -10,7 +10,10 @@
     "wallz-bot",
     "quoridor",
     "chrome-extension",
+    "browser-extension",
+    "javascript",
     "game-ai",
+    "monte-carlo-tree-search",
     "webgpu",
     "onnx-runtime"
   ],

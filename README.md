@@ -1,6 +1,10 @@
 # Wallz Adviser: Wallz.gg Bot and Chrome Extension
 
-Wallz Adviser is a local **Wallz bot and Chrome extension for [wallz.gg](https://www.wallz.gg/)**. It suggests pawn moves and wall placements directly on the board, shows a faint path to the goal, and can play suggested moves with optional autoplay. Analysis runs on your computer using a neural model and lookahead search, with GPU acceleration when available.
+Wallz Adviser is a local **Wallz bot and Chrome extension for [wallz.gg](https://www.wallz.gg/)**. Get move and wall suggestions directly on the board, a faint path to the goal, and optional autoplay. Neural evaluation and lookahead search run on your computer, with GPU acceleration when available.
+
+**Chrome 116+ · Windows / macOS · Local CPU / GPU analysis · MIT license**
+
+**[Download ZIP](https://github.com/slimfeet674/wallz-adviser/archive/refs/heads/main.zip)** · [Installation](#install) · [Report a bug](https://github.com/slimfeet674/wallz-adviser/issues/new/choose) · [Contribute](CONTRIBUTING.md)
 
 ## Install
 
@@ -66,3 +70,9 @@ npm run check
 ```
 
 Browser-check scripts additionally require Playwright and an installed Chromium browser.
+
+## Help and contributions
+
+Found a problem or have an idea? [Open an issue](https://github.com/slimfeet674/wallz-adviser/issues/new/choose). Include your browser, operating system, and steps to reproduce a bug. Pull requests are welcome; see the [contribution guide](CONTRIBUTING.md).
+
+If Wallz Adviser is useful to you, consider [starring the repository](https://github.com/slimfeet674/wallz-adviser).
