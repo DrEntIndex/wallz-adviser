@@ -10,7 +10,7 @@ results.push({scenario:'opponent one step from winning',depth:tactical.depth,rec
 let wins=0,losses=0,unfinished=0;
 for(let game=0;game<8;game++) {
   let state=initial(); const enginePlayer=game%2;
-   
+
   if(game>=2) {state=R.apply(state,{type:'pawn',to:game%4<2?3:5});state=R.apply(state,{type:'pawn',to:game%4<2?75:77});}
   for(let ply=0;ply<160 && state.winner==null;ply++) {
     let move;

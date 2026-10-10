@@ -87,7 +87,7 @@ let browser;
   await send(practice(opening));await ready(8);await resolve(7,result(13,.1));
   await actions.waitFor();
   assertions.push('Opponent turns prepare positions without advice; pause stops preparation and own turns resume normal advice');
-   
+
   const reader=await browser.newPage();
   await reader.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<html><body><svg aria-label="Wallz board"></svg></body></html>'}));
   await reader.goto('https://www.wallz.gg/reader-test');

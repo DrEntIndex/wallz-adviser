@@ -49,21 +49,21 @@ let context,opponentContext,page;
   await page.locator('#wallz-adviser').getByRole('button',{name:'Resume',exact:true}).click();
   await page.locator('#wallz-adviser-overlay [data-action]').waitFor();
   assertions.push('Pause clears advice and resume restores it');
-   
+
   async function pointer(boardPoint) {
     const xy=await page.locator('svg[aria-label="Wallz board"]').evaluate((svg,a)=>{
       const p=svg.createSVGPoint();p.x=a.x;p.y=a.y;const r=p.matrixTransform(svg.getScreenCTM());return {x:r.x,y:r.y};
     },boardPoint);
     await page.mouse.click(xy.x,xy.y);
   }
-  await pointer({x:318,y:534});  
+  await pointer({x:318,y:534});
   await page.waitForFunction(()=>document.querySelector('main')?.innerText.includes('MOVES'));
   await page.locator('#wallz-adviser-overlay [data-action]').waitFor({timeout:20000});
   await page.waitForTimeout(700);
   snap=await readSnapshot(page);
   assert.equal(snap.state.pawns.p1.y,1);
   assertions.push('Pawn movement updates the committed position');
-  await pointer({x:462,y:354});  
+  await pointer({x:462,y:354});
   await page.waitForTimeout(1000);
   snap=await readSnapshot(page);
   assert.ok(snap.state.walls.some(w=>w.x===2&&w.y===3&&w.o==='h'));
@@ -94,11 +94,11 @@ let context,opponentContext,page;
   await page.getByText('tap to skip',{exact:false}).click({timeout:3000}).catch(()=>{});
   assertions.push('Real private room recognised and advice displayed');
   await page.screenshot({path:path.join(evidence,'private-game.png'),fullPage:true});
-   
+
   await opponent.addScriptTag({path:path.join(extension,'bridge.js')});
   snap=await readSnapshot(opponent);assert.equal(snap.player,'p2');assert.equal(snap.flipped,false);
   assertions.push('Second-player board orientation verified');
-   
+
   await page.getByRole('button',{name:'Resign',exact:true}).click();
   await page.getByRole('button',{name:'Confirm resign?',exact:true}).click();
   await page.locator('#wallz-adviser').getByRole('button',{name:'Adviser controls',exact:true}).click();

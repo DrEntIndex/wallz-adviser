@@ -4,7 +4,22 @@
   "private": true,
   "license": "MIT",
   "description": "Local Wallz.gg bot and Chrome extension with move and wall suggestions, optional autoplay, and CPU/WebGPU acceleration",
-  "keywords": ["wallz", "wallz-gg", "wallz-bot", "quoridor", "chrome-extension", "game-ai", "webgpu", "onnx-runtime"],
-  "scripts": { "test": "node --test tests/*.test.cjs", "check": "node scripts/check.cjs", "benchmark": "node scripts/benchmark.cjs" },
-  "engines": { "node": ">=20" }
+  "keywords": [
+    "wallz",
+    "wallz-gg",
+    "wallz-bot",
+    "quoridor",
+    "chrome-extension",
+    "game-ai",
+    "webgpu",
+    "onnx-runtime"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node scripts/check.cjs",
+    "benchmark": "node scripts/benchmark.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }

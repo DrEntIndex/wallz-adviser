@@ -22,7 +22,7 @@ test('opening has three pawn moves and all 128 wall placements', () => {
 });
 
 test('wall placement spends one wall and a turn, and blocks both segments', () => {
-  const s=R.apply(start(),{type:'wall',wall:4});  
+  const s=R.apply(start(),{type:'wall',wall:4});
   assert.equal(s.turn,1);
   assert.deepEqual(s.remaining,[9,10]);
   assert.equal(R.pawnMoves({...s,turn:0}).some(m=>m.to===13),false);
@@ -45,7 +45,7 @@ test('an adjacent opponent permits a straight jump', () => {
 });
 
 test('blocked straight jump permits only open lateral jumps', () => {
-  const s={...start(),pawns:[31,40],walls:[36,92]};  
+  const s={...start(),pawns:[31,40],walls:[36,92]};
   const moves=R.pawnMoves(s).map(m=>m.to);
   assert.equal(moves.includes(49),false);
   assert.equal(moves.includes(39),true);
@@ -59,7 +59,7 @@ test('the board edge also permits lateral jumps', () => {
 });
 
 test('a wall may not seal either player away from the goal', () => {
-  const s={...start(),pawns:[0,76],walls:[64]};  
+  const s={...start(),pawns:[0,76],walls:[64]};
   assert.equal(R.moves(s).some(m=>m.type==='wall'&&m.wall===0),false);
 });
 
@@ -77,7 +77,7 @@ test('a winning pawn move is chosen before any wall', () => {
 
 test('search blocks an opponent threatening to win next turn', () => {
   const s={...start(),pawns:[13,13+9],turn:0};
-   
+
   s.pawns=[40,10];
   const result=E.analyse(s,{budgetMs:400,maxDepth:2});
   const best=result.candidates[0].move;

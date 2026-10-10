@@ -80,7 +80,7 @@
     }
     const maps=[distanceMap(edges,goal(s,0)),distanceMap(edges,goal(s,1))];
     const result={edges,maps};
-     
+
     if (graphCache.size>=12000) graphCache.delete(graphCache.keys().next().value);
     graphCache.set(key,result);
     return result;

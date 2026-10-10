@@ -32,15 +32,13 @@
     if (!ancestors) return { mode: 'unknown', reason: 'Board reader needs an update for this version of Wallz.' };
     const props = ancestors.map(f => f.memoizedProps).filter(p => p && typeof p === 'object');
 
-    // Removed online game checks entirely
     const boardProps = props.slice().reverse().find(p => p.state?.pawns && typeof p.controllable === 'boolean' && p.bottomPlayer);
-    
+
     if (!boardProps) return { mode: 'unknown', reason: 'Could not read the current board.' };
 
     const s = boardProps.state;
     const copy = p => ({ x: p.x, y: p.y });
 
-    // Removed online status checks - now returns data for any game state
     return {
       mode: 'any',
       player: boardProps.bottomPlayer,
@@ -67,9 +65,9 @@
         window.postMessage({ channel: CHANNEL, data }, location.origin);
       }
     } catch {
-      window.postMessage({ 
-        channel: CHANNEL, 
-        data: { mode: 'unknown', reason: 'Could not read this position. Refresh the page.' } 
+      window.postMessage({
+        channel: CHANNEL,
+        data: { mode: 'unknown', reason: 'Could not read this position. Refresh the page.' }
       }, location.origin);
     }
   }
@@ -99,8 +97,6 @@
         const horizontal = move.wall < 64;
         x = (move.wall % 8) * 72 + 66;
         y = Math.floor((move.wall % 64) / 8) * 72 + 66;
-        // Stay inside the slot's snapping region; 36px is its rounding boundary.
-        // An 18px offset also selects the orientation without hitting the crossing.
         if (horizontal) x -= 18;
         else y -= 18;
       } else throw new Error('Invalid recommended move.');
@@ -115,7 +111,6 @@
       const options = {bubbles:true,cancelable:true,view:window,clientX:screen.x,clientY:screen.y,button:0};
       target.dispatchEvent(new PointerEvent('pointermove', {...options,pointerId:1,pointerType:'mouse',isPrimary:true}));
       target.dispatchEvent(new MouseEvent('mousemove', options));
-      // Allow the game's hover preview to commit before pressing the selected slot.
       requestAnimationFrame(() => requestAnimationFrame(() => {
         if (!autoplayEnabled || generation !== playGeneration) return;
         try {
@@ -123,11 +118,9 @@
           const hit = document.elementFromPoint(screen.x, screen.y);
           if (!board.isConnected || !hit || !board.contains(hit)) throw new Error('Board is unavailable.');
           lastPlayed = signature;lastPressGeneration = generation;
-          // Wallz commits both pawn moves and walls in its onPointerDown handler.
           const pointer = {...options,pointerId:1,pointerType:'mouse',isPrimary:true};
           hit.dispatchEvent(new PointerEvent('pointerdown', {...pointer,buttons:1,pressure:0.5}));
           hit.dispatchEvent(new PointerEvent('pointerup', {...pointer,buttons:0,pressure:0}));
-          // The press is only successful once the board advances to another position.
           setTimeout(() => {
             if (lastPressGeneration !== generation) return;
             const active = autoplayEnabled && generation === playGeneration;
