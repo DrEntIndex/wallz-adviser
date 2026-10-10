@@ -1,6 +1,7 @@
 (function(root){
   'use strict';
-  let ready=null,cpu=null,gpu=null,backend='wasm',failure=null,timingMs=20;
+  let ready=null,cpu=null,gpu=null,backend='wasm',failure=null,timingMs=20,cpuMs=20,gpuMs=null,threads=1;
+  const asset=path=>root.chrome?.runtime?.getURL?root.chrome.runtime.getURL(path):new URL(path,root.location.href).href;
   const median=values=>values.slice().sort((a,b)=>a-b)[values.length>>1];
   function validate(answer){
     if(answer.logits.length!==136||!Number.isFinite(answer.value)||Math.abs(answer.value)>1.001||answer.logits.some(value=>!Number.isFinite(value)))throw new Error('Invalid neural evaluation');
@@ -41,9 +42,10 @@
   function init(){
     if(ready)return ready;
     ready=(async()=>{
-      root.ort.env.wasm.numThreads=1;root.ort.env.wasm.proxy=false;root.ort.env.wasm.simd=true;
-      root.ort.env.wasm.wasmPaths=root.chrome.runtime.getURL('vendor/');
-      const response=await fetch(root.chrome.runtime.getURL('models/quoridor.onnx'));
+      threads=root.crossOriginIsolated&&typeof root.SharedArrayBuffer!=='undefined'&&typeof root.Worker==='function'?Math.max(1,Math.floor(root.WallzThreads||root.navigator?.hardwareConcurrency||1)):1;
+      root.ort.env.wasm.numThreads=threads;root.ort.env.wasm.proxy=false;root.ort.env.wasm.simd=true;
+      root.ort.env.wasm.wasmPaths=asset('vendor/');
+      const response=await fetch(asset('models/quoridor.onnx'));
       if(!response.ok)throw new Error('Model could not be loaded');
       const bytes=new Uint8Array(await response.arrayBuffer());
       cpu=await root.ort.InferenceSession.create(bytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'});
@@ -51,7 +53,7 @@
       const inputs=[root.WallzNeural.encode(state),root.WallzNeural.encode({...state,pawns:[22,58],walls:[24,80],remaining:[9,9],turn:1})];
       const references=[],cpuTimes=[];
       for(let i=0;i<4;i++){const start=performance.now();const answer=await runCpu(inputs[i&1]);if(i>=2)cpuTimes.push(performance.now()-start);if(i<2)references.push(answer);}
-      timingMs=median(cpuTimes);
+      cpuMs=timingMs=median(cpuTimes);
       let scoped=false;
       try{
         const adapter=await root.navigator?.gpu?.requestAdapter({powerPreference:'high-performance'});
@@ -66,7 +68,7 @@
           if(Math.abs(answer.value-reference.value)>.002||answer.logits.some((value,j)=>Math.abs(value-reference.logits[j])>.002))throw new Error('GPU evaluation disagrees with CPU');
         }
         const error=await gpu.device.popErrorScope();scoped=false;if(error)throw new Error(error.message);
-        const gpuMs=median(times);
+        gpuMs=median(times);
         if(gpuMs<timingMs*.85){backend='webgpu';timingMs=gpuMs;}
         else{await gpu.release();gpu=null;}
       }catch(error){
@@ -82,5 +84,5 @@
     if(gpu){try{answer=await gpu.run(data);}catch(error){failure=String(error.message||error);const failed=gpu;gpu=null;backend='wasm';await failed.release().catch(()=>{});}}
     answer||=await runCpu(data);timingMs=timingMs*.9+(performance.now()-started)*.1;return answer;
   }
-  root.WallzInference={init,evaluate,info:()=>({backend,inferenceMs:timingMs,failure})};
+  root.WallzInference={init,evaluate,info:()=>({backend,inferenceMs:timingMs,cpuMs,gpuMs,threads,cores:root.navigator?.hardwareConcurrency||1,failure})};
 })(globalThis);

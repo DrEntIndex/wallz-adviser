@@ -84,19 +84,19 @@
   async function search(state,options={}){
     const start=performance.now(),budget=Math.min(3000,Math.max(40,options.budgetMs||3000)),deadline=start+budget-30;
     const predictor=options.predictor||predict;
-    if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget}),engine:'race-search'};
+    if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget,onProgress:options.onProgress,shouldStop:options.shouldStop}),engine:'race-search'};
     const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)});
     if(proof?.move){
       const baseline=R.distances(state),child=R.apply(state,proof.move),after=R.distances(child),us=state.turn;
       return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],engine:'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
     }
-    const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3});
+    const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3,shouldStop:options.shouldStop});
     const best=fallback.candidates[0],certificate=best&&best.score>900?E.certify(R.apply(state,best.move)):null;
     if(state.winner!=null||certificate?.value===-1||state.remaining.every(n=>n===0))return {...fallback,engine:'exact-tactics'};
     if(!options.predictor){
       let timeout;
       try{await Promise.race([init(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Model startup timed out')),Math.max(1,deadline-performance.now()));})]);}
-      catch(error){const result=E.analyse(state,{budgetMs:Math.max(25,deadline-performance.now())});return {...result,engine:'classical-fallback',modelError:String(error.message||error),elapsedMs:Math.round(performance.now()-start)};}
+      catch(error){const result=E.analyse(state,{budgetMs:Math.max(25,deadline-performance.now()),onProgress:options.onProgress,shouldStop:options.shouldStop});return {...result,engine:'classical-fallback',modelError:String(error.message||error),elapsedMs:Math.round(performance.now()-start)};}
       finally{clearTimeout(timeout);}
     }
     if(positions.size>12000)positions.clear();
@@ -108,7 +108,8 @@
       const edge=rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(candidate.move));
       if(edge&&edge.visits===0&&edge.child?.solved!==1&&!probes.includes(edge))probes.push(edge);
     }
-    let simulations=0,maxDepth=0;
+    let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield;
+    options.onProgress?.({nodes:0,phase:'search'});
     while(performance.now()+Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5)<deadline&&!options.shouldStop?.()&&rootNode.solved===null){
       let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
       while(node.edges&&node.solved===null&&path.length<100){
@@ -125,7 +126,9 @@
       node.visits++;
       for(let i=path.length-1;i>=0;i--){value=-value;const entry=path[i];entry.edge.visits++;entry.edge.total+=value;entry.node.visits++;updateSolved(entry.node);}
       simulations++;maxDepth=Math.max(maxDepth,path.length);
-      if((simulations&3)===0)await new Promise(resolve=>setTimeout(resolve,0));
+      const now=performance.now();
+      if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:simulations,phase:'search'});}
+      if(now-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
     }
     const edges=rootNode.edges.slice().sort((a,b)=>{
       const av=a.child?.solved===-1?2:a.child?.solved===1?-2:0,bv=b.child?.solved===-1?2:b.child?.solved===1?-2:0;
@@ -142,17 +145,18 @@
   async function analyse(state,options={}){
     const start=performance.now();
     try{return await search(state,options);}catch(error){
-      const budget=Math.min(3000,options.budgetMs||3000),result=E.analyse(state,{budgetMs:Math.max(25,budget-(performance.now()-start))});
+      const budget=Math.min(3000,options.budgetMs||3000),result=E.analyse(state,{budgetMs:Math.max(25,budget-(performance.now()-start)),onProgress:options.onProgress,shouldStop:options.shouldStop});
       return {...result,engine:'classical-fallback',modelError:String(error.message||error),elapsedMs:Math.round(performance.now()-start)};
     }
   }
   async function prepare(state,options={}){
     const start=performance.now(),deadline=start+Math.min(4000,Math.max(40,options.budgetMs||4000));
+    let lastYield=start,lastProgress=start;options.onProgress?.({nodes:0,phase:'prepare'});
     const stopped=()=>performance.now()>=deadline||options.shouldStop?.();
     if(state.variant!=='classic'||state.winner!=null||state.remaining.every(n=>n===0)||stopped())return {prepared:0,stopped:!!options.shouldStop?.()};
     await init();
     const queue=[{state,depth:0}],seen=new Set();let prepared=0,visited=0;
-    for(let index=0;index<queue.length&&visited<768&&!stopped();index++){
+    for(let index=0;index<queue.length&&!stopped();index++){
       const entry=queue[index],key=R.stateKey(entry.state);if(seen.has(key))continue;seen.add(key);
       const cached=evaluations.has(key),answer=await predict(entry.state);if(!cached)prepared++;visited++;
       if(stopped())break;
@@ -161,7 +165,9 @@
         if(entry.depth>0)children.sort((a,b)=>answer.logits[policyIndex(entry.state,b.move)]-answer.logits[policyIndex(entry.state,a.move)]);
         for(const child of (entry.depth===0?children:children.slice(0,8)))if(child.state.winner==null)queue.push({state:child.state,depth:entry.depth+1});
       }
-      if((visited&3)===0||root.WallzInference.info().backend!=='webgpu')await new Promise(resolve=>setTimeout(resolve,0));
+      const now=performance.now();
+      if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:visited,phase:'prepare'});}
+      if(now-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
     }
     return {prepared,visited,stopped:!!options.shouldStop?.(),elapsedMs:Math.round(performance.now()-start)};
   }

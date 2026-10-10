@@ -9,7 +9,8 @@
     <style>
       :host{font-family:system-ui,sans-serif;color:#edf4f0;font-size:12px;color-scheme:dark}
       *{box-sizing:border-box}button{font:inherit;color:inherit;cursor:pointer}
-      .trigger{width:36px;height:36px;border:1px solid #395650;border-radius:50%;background:#14211ff2;font-size:20px;display:block;margin-left:auto}
+      .trigger{width:36px;height:36px;border:1px solid #395650;border-radius:50%;background:#14211ff2;font-size:20px;display:block}
+      .toolbar{display:flex;justify-content:flex-end;align-items:center;gap:9px}.counter{font-size:11px;color:#adc2b5;font-variant-numeric:tabular-nums;white-space:nowrap}
       .panel{width:196px;max-width:calc(100vw - 28px);margin-bottom:8px;padding:12px;background:#14211ff5;border:1px solid #395650;border-radius:12px;box-shadow:0 8px 24px #0005}
       label{color:#bbcdc3}
       .autoplay{display:flex;align-items:center;gap:8px;cursor:pointer}.autoplay input{accent-color:#80f4c0}
@@ -21,7 +22,7 @@
       <label class="autoplay"><input id="autoplay" type="checkbox">Autoplay best move</label>
       <button class="pause">Pause</button><p class="status" role="status" aria-live="polite">Reading board…</p>
     </section>
-    <button class="trigger" aria-label="Adviser controls" aria-expanded="false" title="Adviser controls">⚙︎</button>`;
+    <div class="toolbar"><span class="counter" title="Positions explored in the current search" aria-label="0 positions explored">0 explored</span><button class="trigger" aria-label="Adviser controls" aria-expanded="false" title="Adviser controls">⚙︎</button></div>`;
   document.documentElement.append(host);
   const $=selector=>shadow.querySelector(selector);
   const overlay=document.createElementNS(SVG,'svg');
@@ -64,6 +65,15 @@
     playTimer=setTimeout(()=>retryAutoplay('Waiting for the board to respond; retrying…'),2500);
   }
 
+  const counterFormat=new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1});
+  function searchCounter(nodes=0,phase='search',inference=null) {
+    nodes=Number.isFinite(nodes)?Math.max(0,Math.floor(nodes)):0;
+    const label=phase==='prepare'?'prepared':'explored',counter=$('.counter');
+    counter.textContent=counterFormat.format(nodes)+' '+label;
+    const description=phase==='prepare'?'Positions visited while preparing opponent replies':'Search lines explored this turn';
+    counter.title=description+(inference?' · '+(inference.backend==='webgpu'?'GPU':inference.threads+' CPU threads'):'');
+    counter.setAttribute('aria-label',nodes+' '+description.toLowerCase());
+  }
   function status(message) {
     $('.status').textContent=message;$('.status').hidden=!message;
     $('.trigger').title=message || 'Adviser controls';
@@ -104,7 +114,7 @@
   function stopSearch(){return chrome.runtime.sendMessage({type:'WALLZ_STOP',id:requestId}).catch(()=>{});}
   function analyse() {
     clearTimeout(timer);clearAdvice();
-    const id=++requestId;
+    const id=++requestId;searchCounter();
     if(!enabled){stopSearch();status('Paused');return;}
     if(!captured?.state || !position){stopSearch();return;}
     if(position.winner!=null){stopSearch();status('Game finished');return;}
@@ -119,7 +129,7 @@
         const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state});
         if(id!==requestId || !enabled)return;
         if(response?.error || !response?.result)throw new Error(response?.error || 'No analysis returned');
-        result=response.result;status('');draw();autoplay();
+        result=response.result;searchCounter(result.nodes, 'search',result.inference);status('');draw();autoplay();
       } catch(error) {
         if(id!==requestId)return;
         status('Analysis unavailable. Refresh Wallz if you reloaded the extension.');
@@ -141,7 +151,7 @@
     if(signature===lastSignature){align();return;}
     cancelAutoplay();playFailures=0;syncAutoplay();
     if(!data.state)lastAutoPosition='';
-    lastSignature=signature;captured=data;
+    lastSignature=signature;captured=data;searchCounter();
     requestId++;clearTimeout(timer);clearAdvice();
     if(!['any','practice','private','unranked','hot-seat'].includes(data.mode) || !data.state){
       position=null;stopSearch();status(String(data.reason || 'Open a practice or private game.'));return;
@@ -154,7 +164,10 @@
   $('.trigger').addEventListener('click',toggleMenu);
   $('.pause').addEventListener('click',()=>{enabled=!enabled;$('.pause').textContent=enabled?'Pause':'Resume';cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();analyse();});
   $('#autoplay').addEventListener('change',()=>{cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();if($('#autoplay').checked)autoplay();else status(enabled?'':'Paused');});
-  chrome.runtime.onMessage.addListener(message=>{if(message?.type==='WALLZ_TOGGLE')toggleMenu();});
+  chrome.runtime.onMessage.addListener(message=>{
+    if(message?.type==='WALLZ_TOGGLE')toggleMenu();
+    if(message?.type==='WALLZ_PROGRESS'&&message.id===requestId&&enabled&&position?.winner==null)searchCounter(message.nodes,message.phase);
+  });
   document.addEventListener('click',event=>{if(!event.composedPath().includes(host))setMenu(false);});
   document.addEventListener('keydown',event=>{if(event.key==='Escape' && !$('.panel').hidden){setMenu(false);$('.trigger').focus();}});
   window.addEventListener('scroll',align,{passive:true});window.addEventListener('resize',align,{passive:true});

@@ -1,10 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Wallz Adviser",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
+  "cross_origin_embedder_policy": { "value": "require-corp" },
+  "cross_origin_opener_policy": { "value": "same-origin" },
+  "permissions": ["offscreen"],
   "description": "Local move and wall suggestions for Wallz practice and private games.",
-  "minimum_chrome_version": "111",
+  "minimum_chrome_version": "116",
   "background": { "service_worker": "background.js" },
   "action": { "default_title": "Show or hide Wallz Adviser" },
   "content_scripts": [

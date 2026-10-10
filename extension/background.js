@@ -1,8 +1,11 @@
 'use strict';
 importScripts('rules.js','engine.js','vendor/ort.webgpu.min.js','inference.js','neural.js');
+if(chrome.offscreen&&chrome.runtime.getContexts)importScripts('compute.js');
 const waiting=new Map(),generations=new Map(),preparing=new Map(),foreground=new Set();
+const compute=()=>globalThis.WallzCompute||globalThis.WallzNeural;
+function progress(tabId,id,generation){return update=>{if(generations.get(tabId)===generation)chrome.tabs.sendMessage(tabId,{type:'WALLZ_PROGRESS',id,...update}).catch(()=>{});};}
 let searches=Promise.resolve(),preparationActive=false;
-if(globalThis.WallzNeural)WallzNeural.init().catch(error=>console.error('Neural initialization failed',error));
+if(compute())compute().init().catch(error=>console.error('Neural initialization failed',error));
 
 function invalidate(tabId){
   const generation=(generations.get(tabId)||0)+1;generations.set(tabId,generation);
@@ -11,12 +14,13 @@ function invalidate(tabId){
   preparing.delete(tabId);return generation;
 }
 function queuePreparation(){
-  if(preparationActive||foreground.size||!globalThis.WallzNeural?.prepare)return;
+  if(preparationActive||foreground.size||!compute()?.prepare)return;
   const job=preparing.values().next().value;if(!job)return;
   preparationActive=true;
   searches=searches.catch(()=>{}).then(async()=>{
     if(foreground.size||generations.get(job.tabId)!==job.generation)return;
-    const result=await WallzNeural.prepare(job.state,{budgetMs:4000,shouldStop:()=>foreground.size>0||generations.get(job.tabId)!==job.generation});
+    const result=await compute().prepare(job.state,{budgetMs:4000,shouldStop:()=>foreground.size>0||generations.get(job.tabId)!==job.generation,onProgress:progress(job.tabId,job.id,job.generation)});
+    progress(job.tabId,job.id,job.generation)({nodes:result.visited||0,phase:'prepare'});
     if(!result.stopped&&preparing.get(job.tabId)===job)preparing.delete(job.tabId);
   }).catch(()=>{if(preparing.get(job.tabId)===job)preparing.delete(job.tabId);}).finally(()=>{preparationActive=false;queuePreparation();});
 }
@@ -29,22 +33,25 @@ chrome.runtime.onMessage.addListener((request,sender,respond)=>{
     if(request.type==='WALLZ_STOP'){invalidate(tabId);respond({id:request.id,stopped:true});return false;}
     const state=WallzRules.normalize(request.state),generation=invalidate(tabId);
     if(request.type==='WALLZ_PREPARE'){
-      if(state.winner==null&&state.variant==='classic'){preparing.set(tabId,{tabId,state,generation});queuePreparation();}
+      if(state.winner==null&&state.variant==='classic'){preparing.set(tabId,{tabId,id:request.id,state,generation});queuePreparation();}
       respond({id:request.id,preparing:true});return false;
     }
     const job={id:request.id,respond,tabId};foreground.add(job);
     job.timer=setTimeout(()=>{
       waiting.delete(tabId);
-      if(globalThis.WallzNeural){
+      if(compute()){
         searches=searches.catch(()=>{}).then(async()=>{
           if(generations.get(tabId)!==generation){respond({id:request.id,error:'Superseded by a newer position'});return;}
           try{
-            const result=await WallzNeural.analyse(state,{budgetMs:3000,shouldStop:()=>generations.get(tabId)!==generation});
+            const result=await compute().analyse(state,{budgetMs:3000,shouldStop:()=>generations.get(tabId)!==generation,onProgress:progress(tabId,request.id,generation)});
             respond(generations.get(tabId)===generation?{id:request.id,result}:{id:request.id,error:'Superseded by a newer position'});
-          }catch(error){respond({id:request.id,error:error.message});}
+          }catch(error){
+            if(globalThis.WallzCompute&&generations.get(tabId)===generation){try{respond({id:request.id,result:{...WallzEngine.analyse(state,{budgetMs:3000,onProgress:progress(tabId,request.id,generation)}),engine:'classical-fallback',modelError:error.message}});}catch(fallback){respond({id:request.id,error:fallback.message});}}
+            else respond({id:request.id,error:error.message});
+          }
         }).finally(()=>{foreground.delete(job);queuePreparation();});
       }else{
-        try{respond({id:request.id,result:WallzEngine.analyse(state,{budgetMs:3000})});}
+        try{respond({id:request.id,result:WallzEngine.analyse(state,{budgetMs:3000,onProgress:progress(tabId,request.id,generation)})});}
         catch(error){respond({id:request.id,error:error.message});}
         finally{foreground.delete(job);queuePreparation();}
       }

@@ -7,6 +7,13 @@ function start() {
   return R.normalize({pawns:{p1:{x:4,y:0},p2:{x:4,y:8}},walls:[],wallsRemaining:{p1:10,p2:10},turn:'p1',winner:null});
 }
 
+test('classical CPU work observes cancellation and still restores a legal position',()=>{
+ const s=start(),before=JSON.stringify(s);let checks=0;
+ const result=E.analyse(s,{budgetMs:3000,shouldStop:()=>++checks>5});
+ assert.ok(result.elapsedMs<500);assert.ok(checks>5);
+ assert.equal(JSON.stringify(s),before);assert.doesNotThrow(()=>R.apply(s,result.candidates[0].move));
+});
+
 test('opening has three pawn moves and all 128 wall placements', () => {
   const s=start();
   assert.deepEqual(R.pawnMoves(s).map(m=>m.to).sort((a,b)=>a-b),[3,5,13]);

@@ -17,7 +17,8 @@
   function random(){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return seed>>>0;}
   const zLo=Uint32Array.from({length:313},random),zHi=Uint32Array.from({length:313},random);
   let lo=0,hi=0,turn=0,winner=-1,variant=0,sp=0,ep=0,info=null,nodes=0,deadline=0,age=0;
-  function check(){if(performance.now()>=deadline)throw TIMEOUT;}
+  let report=null,lastReported=0,stop=null;
+  function check(){const now=performance.now();if(report&&(nodes&255)===0&&now-lastReported>=250){lastReported=now;report({nodes,phase:'search'});}if(now>=deadline||stop?.())throw TIMEOUT;}
   function xor(index){lo=(lo^zLo[index])>>>0;hi=(hi^zHi[index])>>>0;}
   function boardKey(){return variant+':'+bits.join('.');}
   function mapFor(row) {
@@ -270,8 +271,8 @@
   function external(mv){return mv<128?{type:'pawn',to:mv}:{type:'wall',wall:mv-128};}
   function analyse(state,options={}) {
     const start=performance.now(),budget=Math.min(3000,Math.max(25,Number(options.budgetMs)||3000));deadline=start+Math.max(10,budget-20);
-    nodes=0;age=(age+1)&65535;if(!age){tAge.fill(0);age=1;}history.fill(0);killers.fill(-1);evalCache.clear();load(state);
-    if(winner>=0)return {candidates:[],depth:0,nodes:0,elapsedMs:Math.round(performance.now()-start),legalCount:0,searchedCount:0,paths:R.distances(state)};
+    report=options.onProgress||null;stop=options.shouldStop||null;lastReported=start;nodes=0;age=(age+1)&65535;if(!age){tAge.fill(0);age=1;}history.fill(0);killers.fill(-1);evalCache.clear();load(state);
+    if(winner>=0){report=null;stop=null;return {candidates:[],depth:0,nodes:0,elapsedMs:Math.round(performance.now()-start),legalCount:0,searchedCount:0,paths:R.distances(state)};}
     let roots=[],completed=null,depthDone=0,legalCount=0;
     try{const n=generate(0,true,-1,false);legalCount=n;
       for(let i=0;i<n;i++){const mv=lists[0][i];make(mv);let value;try{value=-basic();}finally{undo();}roots.push({mv,score:value,exact:true});}
@@ -289,7 +290,7 @@
           if(!hand[0]&&!hand[1])break;
         }
       }
-    }catch(error){if(error!==TIMEOUT)throw error;}
+    }catch(error){if(error!==TIMEOUT)throw error;}finally{report=null;stop=null;}
     if(!completed?.length){const moves=R.pawnMoves(state);completed=moves.map(m=>({mv:m.to,score:-R.turnDistance(R.apply(state,m),state.turn)*100,exact:false})).sort((a,b)=>b.score-a.score);}
     if(sp!==0||ep!==0)throw new Error('Search state was not restored');
     const baseline=R.distances(state),us=state.turn,candidates=[];
@@ -302,7 +303,7 @@
   }
   function evaluate(state){load(state);return basic();}
   function certify(state,options={}) {
-    deadline=performance.now()+(options.budgetMs||15);load(state);
+    report=null;stop=null;deadline=performance.now()+(options.budgetMs||15);load(state);
     try{
       if(winner>=0)return {value:winner===turn?1:-1,plies:0};
       if(immediate(turn))return {value:1,plies:1};
