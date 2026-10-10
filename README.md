@@ -1,6 +1,6 @@
-# Wallz Adviser for wallz.gg
+# Wallz Adviser: Wallz.gg Bot and Chrome Extension
 
-A browser extension for [Wallz (wallz.gg)](https://www.wallz.gg/) that highlights a suggested move or wall on the board, with a faint path to the goal. Analysis runs on your computer.
+Wallz Adviser is a local **Wallz bot and Chrome extension for [wallz.gg](https://www.wallz.gg/)**. It suggests pawn moves and wall placements directly on the board, shows a faint path to the goal, and can play suggested moves with optional autoplay. Analysis runs on your computer using a neural model and lookahead search, with GPU acceleration when available.
 
 ## Install
 
@@ -39,6 +39,16 @@ The extension reads the current board, checks legal moves and walls, and looks a
 The model is bundled with the extension. Analysis runs locally, without sending positions to an analysis server. There is no extension telemetry.
 
 Suggestions are estimates, not guaranteed wins. Wallz updates can change how the board is read; if the extension stops recognizing it, the reader may need an update.
+
+## Common questions
+
+**Is this the bot for Walls.gg?**
+
+If you searched for a "Walls.gg bot" or "Walls bot," the game this extension supports is **Wallz**, spelled with a **z**, at `wallz.gg`.
+
+**Can the Wallz bot play automatically?**
+
+Yes. Enable **Autoplay best move** in the gear menu. You still open and join games yourself.
 
 ## License and credits
 
