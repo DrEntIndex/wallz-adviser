@@ -1,3 +1,15 @@
 work/
 node_modules/
 *.zip
+.serena/
+outputs/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+Thumbs.db
+.DS_Store

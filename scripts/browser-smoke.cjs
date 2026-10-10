@@ -34,47 +34,41 @@ let context,opponentContext,page;
   await page.waitForTimeout(1500);
   await page.getByRole('button',{name:'Play Computer',exact:true}).click();
   await page.getByRole('button',{name:'Start',exact:true}).click();
-  await page.locator('#wallz-adviser').getByText('Recommended move',{exact:true}).waitFor({timeout:20000});
+  await page.locator('#wallz-adviser-overlay [data-action]').waitFor({timeout:20000});
   await page.getByText('tap to skip',{exact:false}).click({timeout:3000}).catch(()=>{});
   let snap=await readSnapshot(page);
   assert.equal(snap.mode,'practice');assert.equal(snap.state.turn,'p1');assert.equal(snap.flipped,true);
-  const candidates=page.locator('#wallz-adviser').locator('.candidate');
-  assert.equal(await candidates.count(),3);
-  assertions.push('Real practice board captured and three recommendations rendered');
+  const candidates=page.locator('#wallz-adviser-overlay [data-action]');
+  assert.equal(await candidates.count(),1);
+  assertions.push('Real practice board captured and one next action rendered');
   await page.screenshot({path:path.join(evidence,'practice-desktop.png'),fullPage:true});
-  // Hover a wall suggestion without clicking the underlying game.
-  const beforeHover=await readSnapshot(page);
-  await candidates.nth(1).hover();
-  assert.ok((await candidates.nth(1).getAttribute('class')).includes('selected'));
-  assert.ok(!(await candidates.nth(0).getAttribute('class')).includes('selected'));
-  assert.deepEqual((await readSnapshot(page)).state,beforeHover.state);
-  assertions.push('Alternative highlighting responds without submitting moves');
+  await page.locator('#wallz-adviser').getByRole('button',{name:'Adviser controls',exact:true}).click();
   await page.locator('#wallz-adviser').getByRole('button',{name:'Pause',exact:true}).click();
-  await page.locator('#wallz-adviser').getByText('Analysis paused',{exact:true}).waitFor();
+  await page.locator('#wallz-adviser').getByText('Paused',{exact:true}).waitFor();
   assert.equal(await candidates.count(),0);
   await page.locator('#wallz-adviser').getByRole('button',{name:'Resume',exact:true}).click();
-  await page.locator('#wallz-adviser').getByText('Recommended move',{exact:true}).waitFor();
+  await page.locator('#wallz-adviser-overlay [data-action]').waitFor();
   assertions.push('Pause clears advice and resume restores it');
-  // Two ordinary UI moves check committed React updates and placed-wall extraction.
+   
   async function pointer(boardPoint) {
     const xy=await page.locator('svg[aria-label="Wallz board"]').evaluate((svg,a)=>{
       const p=svg.createSVGPoint();p.x=a.x;p.y=a.y;const r=p.matrixTransform(svg.getScreenCTM());return {x:r.x,y:r.y};
     },boardPoint);
     await page.mouse.click(xy.x,xy.y);
   }
-  await pointer({x:318,y:534}); // e2 on the rotated p1 board
+  await pointer({x:318,y:534});  
   await page.waitForFunction(()=>document.querySelector('main')?.innerText.includes('MOVES'));
-  await page.locator('#wallz-adviser').getByText('Recommended move',{exact:true}).waitFor({timeout:20000});
+  await page.locator('#wallz-adviser-overlay [data-action]').waitFor({timeout:20000});
   await page.waitForTimeout(700);
   snap=await readSnapshot(page);
   assert.equal(snap.state.pawns.p1.y,1);
   assertions.push('Pawn movement updates the committed position');
-  await pointer({x:462,y:354}); // horizontal wall h(c4) rotated to screen
+  await pointer({x:462,y:354});  
   await page.waitForTimeout(1000);
   snap=await readSnapshot(page);
   assert.ok(snap.state.walls.some(w=>w.x===2&&w.y===3&&w.o==='h'));
   assertions.push('Placed wall, orientation and remaining inventory are captured');
-  await page.locator('#wallz-adviser').getByText('Recommended move',{exact:true}).waitFor({timeout:20000});
+  await page.locator('#wallz-adviser-overlay [data-action]').waitFor({timeout:20000});
   await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:path.join(evidence,'practice-mobile.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
@@ -95,20 +89,19 @@ let context,opponentContext,page;
   await opponent.getByRole('button',{name:'Join room Have a code?'}).click();
   await opponent.getByPlaceholder('ABCDEF').fill(code);
   await opponent.getByRole('button',{name:'Join room',exact:true}).click();
-  await page.locator('#wallz-adviser').getByText('Recommended move',{exact:true}).waitFor({timeout:20000});
+  await page.locator('#wallz-adviser-overlay [data-action]').waitFor({timeout:20000});
   snap=await readSnapshot(page);assert.equal(snap.mode,'private');
   await page.getByText('tap to skip',{exact:false}).click({timeout:3000}).catch(()=>{});
   assertions.push('Real private room recognised and advice displayed');
   await page.screenshot({path:path.join(evidence,'private-game.png'),fullPage:true});
-  // Exercise p2 reader and board orientation with the same extension scripts in the opponent context.
+   
   await opponent.addScriptTag({path:path.join(extension,'bridge.js')});
   snap=await readSnapshot(opponent);assert.equal(snap.player,'p2');assert.equal(snap.flipped,false);
   assertions.push('Second-player board orientation verified');
-  // Restore the test room to a completed state through the ordinary resignation UI.
-  await page.locator('#wallz-adviser').getByRole('button',{name:'Minimise adviser'}).click();
+   
   await page.getByRole('button',{name:'Resign',exact:true}).click();
   await page.getByRole('button',{name:'Confirm resign?',exact:true}).click();
-  await page.locator('#wallz-adviser').getByRole('button',{name:'↗ Wallz Adviser'}).click();
+  await page.locator('#wallz-adviser').getByRole('button',{name:'Adviser controls',exact:true}).click();
   await page.locator('#wallz-adviser').getByText(/^Game finished\.?$/).waitFor({timeout:15000});
   assert.equal(await candidates.count(),0);
   assertions.push('Ended game clears recommendations');

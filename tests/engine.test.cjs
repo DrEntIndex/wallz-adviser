@@ -15,7 +15,7 @@ test('opening has three pawn moves and all 128 wall placements', () => {
 });
 
 test('wall placement spends one wall and a turn, and blocks both segments', () => {
-  const s=R.apply(start(),{type:'wall',wall:4}); // horizontal (4,0)
+  const s=R.apply(start(),{type:'wall',wall:4});  
   assert.equal(s.turn,1);
   assert.deepEqual(s.remaining,[9,10]);
   assert.equal(R.pawnMoves({...s,turn:0}).some(m=>m.to===13),false);
@@ -38,7 +38,7 @@ test('an adjacent opponent permits a straight jump', () => {
 });
 
 test('blocked straight jump permits only open lateral jumps', () => {
-  const s={...start(),pawns:[31,40],walls:[36,92]}; // h(4,4), v(4,3)
+  const s={...start(),pawns:[31,40],walls:[36,92]};  
   const moves=R.pawnMoves(s).map(m=>m.to);
   assert.equal(moves.includes(49),false);
   assert.equal(moves.includes(39),true);
@@ -52,7 +52,7 @@ test('the board edge also permits lateral jumps', () => {
 });
 
 test('a wall may not seal either player away from the goal', () => {
-  const s={...start(),pawns:[0,76],walls:[64]}; // vertical (0,0) traps p1 if h(0,0) added
+  const s={...start(),pawns:[0,76],walls:[64]};  
   assert.equal(R.moves(s).some(m=>m.type==='wall'&&m.wall===0),false);
 });
 
@@ -70,7 +70,7 @@ test('a winning pawn move is chosen before any wall', () => {
 
 test('search blocks an opponent threatening to win next turn', () => {
   const s={...start(),pawns:[13,13+9],turn:0};
-  // Opponent is two rows from their goal; put them one row away without adjacency.
+   
   s.pawns=[40,10];
   const result=E.analyse(s,{budgetMs:400,maxDepth:2});
   const best=result.candidates[0].move;
@@ -85,6 +85,8 @@ test('recommendations are legal and have a coherent shared search depth', () => 
   assert.ok(result.candidates.length>=3);
   for(const c of result.candidates) assert.ok(legal.includes(R.moveKey(c.move)));
   assert.ok(result.depth>=1);
+  assert.equal(result.legalCount,131);
+  assert.equal(result.searchedCount,131);
   assert.ok(result.candidates.every(c=>Number.isFinite(c.score)));
 });
 
@@ -105,4 +107,98 @@ test('analysis never mutates the captured game position', () => {
   const s=start(),before=JSON.stringify(s);
   E.analyse(s,{budgetMs:40,maxDepth:1});
   assert.equal(JSON.stringify(s),before);
+});
+
+
+test('pawn-only endgames choose the shortest forced win including lateral jumps', () => {
+  const s={...start(),pawns:[49,58],walls:[52],remaining:[0,0]};
+  const memo=new Map();
+  function forcedWin(state,plies) {
+    if(state.winner!=null)return state.winner===0;
+    if(!plies)return false;
+    const key=R.stateKey(state)+':'+plies;
+    if(memo.has(key))return memo.get(key);
+    const children=R.pawnMoves(state).map(m=>R.apply(state,m));
+    const wins=state.turn===0?children.some(child=>forcedWin(child,plies-1)):children.every(child=>forcedWin(child,plies-1));
+    memo.set(key,wins);return wins;
+  }
+  const winningMoves=R.pawnMoves(s).filter(m=>forcedWin(R.apply(s,m),4));
+  assert.deepEqual(winningMoves,[{type:'pawn',to:57}]);
+  assert.equal(forcedWin(s,3),false);
+  const result=E.analyse(s,{budgetMs:150,maxDepth:1});
+  assert.deepEqual(result.candidates[0].move,winningMoves[0]);
+  assert.equal(result.candidates[0].score,999.95);
+});
+
+test('a last wall delays the finish and is included in the best opponent reply', () => {
+  const s={...start(),pawns:[58,40],remaining:[0,1]};
+  const result=E.analyse(s,{budgetMs:300,maxDepth:2});
+  const best=result.candidates[0],child=R.apply(s,best.move);
+  assert.deepEqual(best.move,{type:'pawn',to:67});
+  assert.equal(best.reply.type,'wall');
+  const blocked=R.apply(child,best.reply);
+  assert.equal(R.pawnMoves(blocked).some(m=>Math.floor(m.to/9)===8),false);
+  const race=E.analyse({...s,remaining:[0,0]},{budgetMs:150,maxDepth:1});
+  assert.equal(race.candidates[0].score,999.97);
+  assert.equal(best.score,999.95);
+});
+
+test('oversized time requests stay within the three-second search budget', () => {
+  const s=start(),before=JSON.stringify(s),started=performance.now();
+  const result=E.analyse(s,{budgetMs:10000,maxDepth:30});
+  assert.ok(performance.now()-started<3200);
+  assert.ok(result.elapsedMs<3200);
+  assert.equal(result.searchedCount,131);
+  assert.equal(JSON.stringify(s),before);
+  assert.ok(R.moves(s).some(m=>R.moveKey(m)===R.moveKey(result.candidates[0].move)));
+});
+
+test('closing a corridor protects its exit from every legal blocking wall', () => {
+  const s={...start(),pawns:[49,36],walls:[91,92,107,108,123,124],remaining:[7,7]};
+  const threat={type:'wall',wall:51};
+  assert.ok(R.moves({...s,turn:1}).some(m=>R.moveKey(m)===R.moveKey(threat)));
+  assert.ok(R.distances(R.apply({...s,turn:1},threat))[0]>3);
+  const result=E.analyse(s,{budgetMs:300,maxDepth:1}),best=result.candidates[0];
+  assert.equal(best.move.type,'wall');
+  assert.equal(best.ownDelay,0);
+  assert.equal(best.opponentDelay,0);
+  assert.equal(best.score,999.93);
+  const guarded=R.apply(s,best.move);
+  assert.equal(R.moves(guarded).some(m=>m.type==='wall'&&m.wall===51),false);
+  for(const move of R.moves(guarded).filter(m=>m.type==='wall')){
+    assert.equal(R.distances(R.apply(guarded,move))[0],3);
+  }
+});
+
+test('an opponent can occupy the corridor exit instead of placing a wall', () => {
+  const s={...start(),pawns:[49,58],walls:[91,92,107,108,123,124],remaining:[7,7]};
+  const result=E.analyse(s,{budgetMs:200,maxDepth:2});
+  assert.deepEqual(result.candidates[0].move,{type:'pawn',to:67});
+  assert.ok(result.candidates[0].score<900);
+  const child=R.apply(s,result.candidates[0].move);
+  const occupied=R.apply(child,{type:'pawn',to:76});
+  assert.equal(R.pawnMoves(occupied).some(m=>Math.floor(m.to/9)===8),false);
+});
+
+test('one-sided wall exhaustion proves only the sound direction of the frozen race', () => {
+  const losing={...start(),remaining:[0,1]};
+  assert.equal(E.certify(losing,{budgetMs:150}).value,-1);
+  assert.equal(E.certify({...losing,remaining:[1,0]},{budgetMs:150}),null);
+  const threatened={...start(),pawns:[58,40],remaining:[0,1]};
+  assert.equal(E.certify(threatened,{budgetMs:150}),null);
+  const winning=E.certify({...threatened,remaining:[1,0]},{budgetMs:150});
+  assert.equal(winning.value,1);
+  assert.deepEqual(winning.move,{type:'pawn',to:67});
+});
+
+test('generated successors match validated application including jumps, walls and terminal states', () => {
+  const states=[start(),{...start(),pawns:[31,40],walls:[36,92],remaining:[8,10]},
+    {...start(),pawns:[0,76],walls:[64],remaining:[9,10]},
+    {...start(),pawns:[67,40],remaining:[0,1]},
+    {...start(),pawns:[12,77],variant:'race'},
+    {...start(),winner:0}];
+  for(const state of states){
+    const before=JSON.stringify(state),expected=R.moves(state).map(move=>({move,state:R.apply(state,move)}));
+    assert.deepEqual(R.successors(state),expected);assert.equal(JSON.stringify(state),before);
+  }
 });

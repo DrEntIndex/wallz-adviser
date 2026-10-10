@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Wallz Adviser",
-  "version": "0.1.0",
+  "version": "0.6.1",
+  "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
   "description": "Local move and wall suggestions for Wallz practice and private games.",
   "minimum_chrome_version": "111",
   "background": { "service_worker": "background.js" },

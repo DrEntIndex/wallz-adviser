@@ -80,8 +80,8 @@
     }
     const maps=[distanceMap(edges,goal(s,0)),distanceMap(edges,goal(s,1))];
     const result={edges,maps};
-    // Bound memory during long searches in the extension service worker.
-    if (graphCache.size>=12000) graphCache.clear();
+     
+    if (graphCache.size>=12000) graphCache.delete(graphCache.keys().next().value);
     graphCache.set(key,result);
     return result;
   }
@@ -105,10 +105,27 @@
 
   function distances(s) { const {maps}=graph(s); return s.pawns.map((p,i)=>maps[i][p]); }
 
-  function legalWall(s,w) {
-    if (!Number.isInteger(w) || w<0 || w>=128 || s.remaining[s.turn]<=0 || conflicts(w,s.walls)) return false;
-    const child={...s,walls:[...s.walls,w].sort((a,b)=>a-b)};
-    return distances(child).every(n=>n>=0);
+  function wallChild(s,w) {
+    if (!Number.isInteger(w) || w<0 || w>=128 || s.remaining[s.turn]<=0 || conflicts(w,s.walls)) return null;
+    const child={...s,turn:1-s.turn,walls:[...s.walls,w].sort((a,b)=>a-b),remaining:s.remaining.slice()};
+    child.remaining[s.turn]--;
+    return distances(child).every(n=>n>=0)?child:null;
+  }
+
+  function legalWall(s,w) { return wallChild(s,w)!==null; }
+
+  function pawnChild(s,to) {
+    const child={...s,turn:1-s.turn,pawns:s.pawns.slice()};child.pawns[s.turn]=to;
+    child.winner=onGoal(child,s.turn)?s.turn:null;return child;
+  }
+
+  function successors(s) {
+    if(s.winner!=null)return [];
+    const result=pawnMoves(s).map(move=>({move,state:pawnChild(s,move.to)}));
+    if(s.remaining[s.turn]>0)for(let w=0;w<128;w++){
+      const child=wallChild(s,w);if(child)result.push({move:{type:'wall',wall:w},state:child});
+    }
+    return result;
   }
 
   function moves(s) {
@@ -145,15 +162,9 @@
 
   function apply(s,m) {
     if(s.winner != null) throw new Error('Game already ended');
-    const child={...s,turn:1-s.turn};
-    if(m.type==='pawn' && pawnMoves(s).some(v=>v.to===m.to)) {
-      child.pawns=s.pawns.slice(); child.pawns[s.turn]=m.to;
-      child.winner=onGoal(child,s.turn)?s.turn:null;
-    } else if(m.type==='wall' && legalWall(s,m.wall)) {
-      child.walls=[...s.walls,m.wall].sort((a,b)=>a-b);
-      child.remaining=s.remaining.slice(); child.remaining[s.turn]--;
-    } else throw new Error('Illegal move');
-    return child;
+    if(m.type==='pawn' && pawnMoves(s).some(v=>v.to===m.to))return pawnChild(s,m.to);
+    if(m.type==='wall'){const child=wallChild(s,m.wall);if(child)return child;}
+    throw new Error('Illegal move');
   }
 
   function path(s, player) {
@@ -176,7 +187,7 @@
 
   const moveKey = m => m.type==='pawn' ? 'p'+m.to : 'w'+m.wall;
   const stateKey = s => [s.variant,s.turn,...s.pawns,...s.remaining,s.walls.join('.')].join(':');
-  const api={normalize,coords,wallCoords,goal,graph,pawnMoves,moves,relevantWalls,apply,distances,path,turnDistance,moveKey,stateKey,clearCache:()=>graphCache.clear()};
+  const api={normalize,coords,wallCoords,goal,graph,pawnMoves,moves,successors,relevantWalls,apply,distances,path,turnDistance,moveKey,stateKey,clearCache:()=>graphCache.clear()};
   root.WallzRules=api;
   if(typeof module!=='undefined') module.exports=api;
 })(globalThis);

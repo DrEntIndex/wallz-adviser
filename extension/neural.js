@@ -1,0 +1,170 @@
+(function(root){
+  'use strict';
+  const R=typeof module!=='undefined'?require('./rules.js'):root.WallzRules;
+  const E=typeof module!=='undefined'?require('./engine.js'):root.WallzEngine;
+  const directions=[[0,1],[0,-1],[-1,0],[1,0],[-1,1],[1,1],[-1,-1],[1,-1]];
+  const evaluations=new Map(),positions=new Map();
+  function encode(state){
+    const out=new Float32Array(648),us=state.turn,them=1-us,flip=us===1;
+    const index=p=>p%9+(flip?8-(p/9|0):p/9|0)*9;
+    out[index(state.pawns[us])]=1;out[81+index(state.pawns[them])]=1;
+    for(const w of state.walls){const x=w&7,y=(w&63)>>3;
+      if(w<64){const p=x+(flip?7-y:y)*9;out[162+p]=1;out[162+p+1]=1;}
+      else{const p=x+(flip?7-y:y)*9;out[243+p]=1;out[243+p+9]=1;}
+    }
+    const maps=R.graph(state).maps;
+    for(let p=0;p<81;p++){const q=index(p);out[324+q]=state.remaining[us]/10;out[405+q]=state.remaining[them]/10;
+      out[486+q]=maps[us][p]<0?1:maps[us][p]/80;out[567+q]=maps[them][p]<0?1:maps[them][p]/80;
+    }
+    return out;
+  }
+  function policyIndex(state,move){
+    const flip=state.turn===1;
+    if(move.type==='wall'){const w=move.wall,x=w&7,y=(w&63)>>3;return 8+(w>=64?64:0)+(flip?7-y:y)*8+x;}
+    const p=state.pawns[state.turn],dx=Math.sign(move.to%9-p%9),dy=Math.sign((move.to/9|0)-(p/9|0))*(flip?-1:1);
+    return directions.findIndex(d=>d[0]===dx&&d[1]===dy);
+  }
+  function init(){
+    return root.WallzInference.init();
+  }
+  async function predict(state){
+    const key=R.stateKey(state);if(evaluations.has(key)){const answer=evaluations.get(key);evaluations.delete(key);evaluations.set(key,answer);return answer;}
+    const answer=await root.WallzInference.evaluate(encode(state));
+    if(evaluations.size>=8192)evaluations.delete(evaluations.keys().next().value);evaluations.set(key,answer);return answer;
+  }
+  function position(state){
+    const key=R.stateKey(state);let node=positions.get(key);
+    if(!node){node={key,state,edges:null,visits:0,solved:null,mate:null,value:0};positions.set(key,node);}
+    return node;
+  }
+  function updateSolved(node){
+    if(!node.edges?.length||node.solved!==null)return;
+    let win=Infinity,hasWin=false,all=true,draw=false,loss=-Infinity;
+    for(const edge of node.edges){
+      const child=edge.child;
+      if(!child||child.solved===null){all=false;continue;}
+      if(child.solved===-1){hasWin=true;win=Math.min(win,child.mate);}
+      if(child.solved===0)draw=true;
+      loss=Math.max(loss,child.mate);
+    }
+    if(hasWin){node.solved=1;node.mate=1+win;return;}
+    if(all){node.solved=draw?0:-1;node.mate=draw?null:1+loss;}
+  }
+  async function expand(node,predictor){
+    const state=node.state,certificate=E.certify(state,{budgetMs:12});
+    if(certificate){node.solved=certificate.value;node.mate=certificate.plies;node.value=certificate.value;return node.value;}
+    const children=R.successors(state),moves=children.map(entry=>entry.move);
+    if(!moves.length){node.solved=0;node.value=0;return 0;}
+    node.edges=moves.map(move=>({move,prior:0,visits:0,total:0,child:null}));
+    for(let i=0;i<node.edges.length;i++){const edge=node.edges[i],child=children[i].state;
+      if(R.pawnMoves(child).some(move=>Math.floor(move.to/9)===R.goal(child,child.turn))){edge.child=position(child);edge.child.solved=1;edge.child.mate=1;}
+    }
+    updateSolved(node);
+    if(node.solved!==null){node.value=node.solved;return node.value;}
+    const edges=node.edges;node.edges=null;
+    const output=await predictor(state),safe=edges.filter(edge=>edge.child?.solved!==1);
+    const logits=safe.map(edge=>output.logits[policyIndex(state,edge.move)]),max=Math.max(...logits);
+    const probabilities=logits.map(value=>Math.exp(value-max)),sum=probabilities.reduce((a,b)=>a+b,0);
+    for(let i=0;i<safe.length;i++)safe[i].prior=probabilities[i]/sum;
+    node.edges=edges;node.value=output.value;return node.value;
+  }
+  function select(node){
+    const scale=Math.sqrt(Math.max(1,node.visits)),exploration=1.25+Math.log((node.visits+19653)/19652);
+    let total=0,visits=0,prior=0;
+    for(const edge of node.edges)if(edge.visits){total+=edge.total;visits+=edge.visits;prior+=edge.prior;}
+    const firstPlay=(visits?total/visits:node.value)-.2*Math.sqrt(prior);
+    let best=null,score=-Infinity;
+    for(const edge of node.edges){const solved=edge.child?.solved;
+      const q=edge.visits?edge.total/edge.visits:firstPlay;
+      const value=solved===-1?10000-(edge.child.mate??1000):solved===1?-10000+(edge.child.mate??0):q+exploration*edge.prior*scale/(1+edge.visits);
+      if(value>score){score=value;best=edge;}
+    }
+    return best;
+  }
+  async function search(state,options={}){
+    const start=performance.now(),budget=Math.min(3000,Math.max(40,options.budgetMs||3000)),deadline=start+budget-30;
+    const predictor=options.predictor||predict;
+    if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget}),engine:'race-search'};
+    const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)});
+    if(proof?.move){
+      const baseline=R.distances(state),child=R.apply(state,proof.move),after=R.distances(child),us=state.turn;
+      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],engine:'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
+    }
+    const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3});
+    const best=fallback.candidates[0],certificate=best&&best.score>900?E.certify(R.apply(state,best.move)):null;
+    if(state.winner!=null||certificate?.value===-1||state.remaining.every(n=>n===0))return {...fallback,engine:'exact-tactics'};
+    if(!options.predictor){
+      let timeout;
+      try{await Promise.race([init(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Model startup timed out')),Math.max(1,deadline-performance.now()));})]);}
+      catch(error){const result=E.analyse(state,{budgetMs:Math.max(25,deadline-performance.now())});return {...result,engine:'classical-fallback',modelError:String(error.message||error),elapsedMs:Math.round(performance.now()-start)};}
+      finally{clearTimeout(timeout);}
+    }
+    if(positions.size>12000)positions.clear();
+    const rootNode=position(state);
+    if(!rootNode.edges&&rootNode.solved===null)await expand(rootNode,predictor);
+    if(!rootNode.edges)return {...fallback,engine:'exact-tactics',elapsedMs:Math.round(performance.now()-start)};
+    const probes=rootNode.edges.filter(edge=>edge.visits===0&&edge.child?.solved!==1).sort((a,b)=>b.prior-a.prior).slice(0,8);
+    for(const candidate of fallback.candidates){
+      const edge=rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(candidate.move));
+      if(edge&&edge.visits===0&&edge.child?.solved!==1&&!probes.includes(edge))probes.push(edge);
+    }
+    let simulations=0,maxDepth=0;
+    while(performance.now()+Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5)<deadline&&!options.shouldStop?.()&&rootNode.solved===null){
+      let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
+      while(node.edges&&node.solved===null&&path.length<100){
+        const edge=node===rootNode&&probes.length?probes.shift():select(node);if(!edge)break;
+        if(!edge.child)edge.child=position(R.apply(node.state,edge.move));
+        path.push({node,edge});node=edge.child;
+        if(seen.has(node.key)){cycle=true;break;}seen.add(node.key);
+        if(performance.now()>=deadline)break;
+      }
+      if(cycle)value=0;
+      else if(!node.edges&&node.solved===null&&performance.now()<deadline)value=await expand(node,predictor);
+      else if(node.solved!==null)value=node.solved;
+      else if(node.edges)value=node.value;
+      node.visits++;
+      for(let i=path.length-1;i>=0;i--){value=-value;const entry=path[i];entry.edge.visits++;entry.edge.total+=value;entry.node.visits++;updateSolved(entry.node);}
+      simulations++;maxDepth=Math.max(maxDepth,path.length);
+      if((simulations&3)===0)await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    const edges=rootNode.edges.slice().sort((a,b)=>{
+      const av=a.child?.solved===-1?2:a.child?.solved===1?-2:0,bv=b.child?.solved===-1?2:b.child?.solved===1?-2:0;
+      const mate=av===2&&bv===2?(a.child.mate??Infinity)-(b.child.mate??Infinity):av===-2&&bv===-2?(b.child.mate??0)-(a.child.mate??0):0;
+      return bv-av||mate||b.visits-a.visits||b.prior-a.prior;
+    });
+    const baseline=R.distances(state),us=state.turn;
+    const candidates=edges.slice(0,3).map(edge=>{
+      const child=R.apply(state,edge.move),distances=R.distances(child),solved=edge.child?.solved;
+      return {move:edge.move,score:solved===-1?999:solved===1?-999:(edge.visits?edge.total/edge.visits:rootNode.value)*10,bound:solved==null?'estimate':'proven',winNow:child.winner===us,reply:null,ownDistance:distances[us],opponentDistance:distances[1-us],ownDelay:distances[us]-baseline[us],opponentDelay:distances[1-us]-baseline[1-us],route:R.path(child,us),visits:edge.visits,prior:edge.prior};
+    });
+    return {candidates,engine:'neural-puct',depth:maxDepth,nodes:simulations,simulations,elapsedMs:Math.round(performance.now()-start),legalCount:rootNode.edges.length,searchedCount:rootNode.edges.filter(e=>e.visits).length,wallWidth:rootNode.edges.filter(e=>e.move.type==='wall').length,paths:baseline,...(!options.predictor?{inference:root.WallzInference.info()}: {})};
+  }
+  async function analyse(state,options={}){
+    const start=performance.now();
+    try{return await search(state,options);}catch(error){
+      const budget=Math.min(3000,options.budgetMs||3000),result=E.analyse(state,{budgetMs:Math.max(25,budget-(performance.now()-start))});
+      return {...result,engine:'classical-fallback',modelError:String(error.message||error),elapsedMs:Math.round(performance.now()-start)};
+    }
+  }
+  async function prepare(state,options={}){
+    const start=performance.now(),deadline=start+Math.min(4000,Math.max(40,options.budgetMs||4000));
+    const stopped=()=>performance.now()>=deadline||options.shouldStop?.();
+    if(state.variant!=='classic'||state.winner!=null||state.remaining.every(n=>n===0)||stopped())return {prepared:0,stopped:!!options.shouldStop?.()};
+    await init();
+    const queue=[{state,depth:0}],seen=new Set();let prepared=0,visited=0;
+    for(let index=0;index<queue.length&&visited<768&&!stopped();index++){
+      const entry=queue[index],key=R.stateKey(entry.state);if(seen.has(key))continue;seen.add(key);
+      const cached=evaluations.has(key),answer=await predict(entry.state);if(!cached)prepared++;visited++;
+      if(stopped())break;
+      if(entry.depth<2&&entry.state.winner==null){
+        const children=R.successors(entry.state);
+        if(entry.depth>0)children.sort((a,b)=>answer.logits[policyIndex(entry.state,b.move)]-answer.logits[policyIndex(entry.state,a.move)]);
+        for(const child of (entry.depth===0?children:children.slice(0,8)))if(child.state.winner==null)queue.push({state:child.state,depth:entry.depth+1});
+      }
+      if((visited&3)===0||root.WallzInference.info().backend!=='webgpu')await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    return {prepared,visited,stopped:!!options.shouldStop?.(),elapsedMs:Math.round(performance.now()-start)};
+  }
+  const api={analyse,prepare,encode,policyIndex,init,clear:()=>{evaluations.clear();positions.clear();}};
+  root.WallzNeural=api;if(typeof module!=='undefined')module.exports=api;
+})(globalThis);

@@ -1,32 +1,58 @@
 'use strict';
-importScripts('rules.js','engine.js');
-const waiting=new Map();
+importScripts('rules.js','engine.js','vendor/ort.webgpu.min.js','inference.js','neural.js');
+const waiting=new Map(),generations=new Map(),preparing=new Map(),foreground=new Set();
+let searches=Promise.resolve(),preparationActive=false;
+if(globalThis.WallzNeural)WallzNeural.init().catch(error=>console.error('Neural initialization failed',error));
 
+function invalidate(tabId){
+  const generation=(generations.get(tabId)||0)+1;generations.set(tabId,generation);
+  const previous=waiting.get(tabId);
+  if(previous){clearTimeout(previous.timer);waiting.delete(tabId);foreground.delete(previous);previous.respond({id:previous.id,error:'Superseded by a newer position'});}
+  preparing.delete(tabId);return generation;
+}
+function queuePreparation(){
+  if(preparationActive||foreground.size||!globalThis.WallzNeural?.prepare)return;
+  const job=preparing.values().next().value;if(!job)return;
+  preparationActive=true;
+  searches=searches.catch(()=>{}).then(async()=>{
+    if(foreground.size||generations.get(job.tabId)!==job.generation)return;
+    const result=await WallzNeural.prepare(job.state,{budgetMs:4000,shouldStop:()=>foreground.size>0||generations.get(job.tabId)!==job.generation});
+    if(!result.stopped&&preparing.get(job.tabId)===job)preparing.delete(job.tabId);
+  }).catch(()=>{if(preparing.get(job.tabId)===job)preparing.delete(job.tabId);}).finally(()=>{preparationActive=false;queuePreparation();});
+}
 chrome.runtime.onMessage.addListener((request,sender,respond)=>{
-  if(request?.type!=='WALLZ_ANALYSE') return false;
-  try {
-    const url=new URL(sender.url || '');
-    if(url.protocol!=='https:' || !['wallz.gg','www.wallz.gg'].includes(url.hostname) || sender.tab?.id == null) throw new Error('Unsupported tab');
-    const state=WallzRules.normalize(request.state);
-    const budgetMs=[350,1200,3500].includes(request.budgetMs)?request.budgetMs:1200;
-    const tabId=sender.tab.id,previous=waiting.get(tabId);
-    if(previous) {
-      clearTimeout(previous.timer);
-      previous.respond({id:previous.id,error:'Superseded by a newer position'});
+  if(!['WALLZ_ANALYSE','WALLZ_PREPARE','WALLZ_STOP'].includes(request?.type))return false;
+  try{
+    const url=new URL(sender.url||'');
+    if(url.protocol!=='https:'||!['wallz.gg','www.wallz.gg'].includes(url.hostname)||sender.tab?.id==null)throw new Error('Unsupported tab');
+    const tabId=sender.tab.id;
+    if(request.type==='WALLZ_STOP'){invalidate(tabId);respond({id:request.id,stopped:true});return false;}
+    const state=WallzRules.normalize(request.state),generation=invalidate(tabId);
+    if(request.type==='WALLZ_PREPARE'){
+      if(state.winner==null&&state.variant==='classic'){preparing.set(tabId,{tabId,state,generation});queuePreparation();}
+      respond({id:request.id,preparing:true});return false;
     }
-    const job={id:request.id,respond};
-    // Coalesce messages delivered after a running search releases the worker.
-    // The active synchronous search finishes; only the latest waiting position runs.
+    const job={id:request.id,respond,tabId};foreground.add(job);
     job.timer=setTimeout(()=>{
       waiting.delete(tabId);
-      try {respond({id:request.id,result:WallzEngine.analyse(state,{budgetMs})});}
-      catch(error) {respond({id:request.id,error:error.message});}
+      if(globalThis.WallzNeural){
+        searches=searches.catch(()=>{}).then(async()=>{
+          if(generations.get(tabId)!==generation){respond({id:request.id,error:'Superseded by a newer position'});return;}
+          try{
+            const result=await WallzNeural.analyse(state,{budgetMs:3000,shouldStop:()=>generations.get(tabId)!==generation});
+            respond(generations.get(tabId)===generation?{id:request.id,result}:{id:request.id,error:'Superseded by a newer position'});
+          }catch(error){respond({id:request.id,error:error.message});}
+        }).finally(()=>{foreground.delete(job);queuePreparation();});
+      }else{
+        try{respond({id:request.id,result:WallzEngine.analyse(state,{budgetMs:3000})});}
+        catch(error){respond({id:request.id,error:error.message});}
+        finally{foreground.delete(job);queuePreparation();}
+      }
     },50);
-    waiting.set(tabId,job);
-    return true;
-  } catch(error) { respond({id:request.id,error:error.message});return false; }
+    waiting.set(tabId,job);return true;
+  }catch(error){respond({id:request.id,error:error.message});return false;}
 });
-
+chrome.tabs.onRemoved?.addListener(tabId=>{invalidate(tabId);generations.delete(tabId);for(const job of foreground)if(job.tabId===tabId)foreground.delete(job);});
 chrome.action.onClicked.addListener(tab=>{
-  if(tab.id!=null) chrome.tabs.sendMessage(tab.id,{type:'WALLZ_TOGGLE'}).catch(()=>{});
+  if(tab.id!=null)chrome.tabs.sendMessage(tab.id,{type:'WALLZ_TOGGLE'}).catch(()=>{});
 });

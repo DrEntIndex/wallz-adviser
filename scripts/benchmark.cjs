@@ -2,17 +2,15 @@ const R=require('../extension/rules.js');
 const E=require('../extension/engine.js');
 const initial=()=>R.normalize({pawns:{p1:{x:4,y:0},p2:{x:4,y:8}},walls:[],wallsRemaining:{p1:10,p2:10},turn:'p1'});
 const results=[];
-for(const budgetMs of [350,1200,3500]) {
-  const result=E.analyse(initial(),{budgetMs});
-  results.push({scenario:'opening',budgetMs,depth:result.depth,nodes:result.nodes,elapsedMs:result.elapsedMs,recommendation:result.candidates[0].move});
-}
+const opening=E.analyse(initial());
+results.push({scenario:'opening',budgetMs:3000,depth:opening.depth,nodes:opening.nodes,elapsedMs:opening.elapsedMs,recommendation:opening.candidates[0].move});
 const defence={...initial(),pawns:[40,10]};
 const tactical=E.analyse(defence,{budgetMs:350});
 results.push({scenario:'opponent one step from winning',depth:tactical.depth,recommendation:tactical.candidates[0].move,blocksImmediateWin:!R.pawnMoves(R.apply(defence,tactical.candidates[0].move)).some(m=>m.to<9)});
 let wins=0,losses=0,unfinished=0;
 for(let game=0;game<8;game++) {
   let state=initial(); const enginePlayer=game%2;
-  // Symmetric sideways opening variations reduce reliance on a single starting position.
+   
   if(game>=2) {state=R.apply(state,{type:'pawn',to:game%4<2?3:5});state=R.apply(state,{type:'pawn',to:game%4<2?75:77});}
   for(let ply=0;ply<160 && state.winner==null;ply++) {
     let move;
@@ -27,4 +25,4 @@ for(let game=0;game<8;game++) {
   else if(state.winner===enginePlayer) wins++;
   else losses++;
 }
-console.log(JSON.stringify({timestamp:new Date().toISOString(),results,baselineMatch:{baseline:'Shortest-route pawn mover (never places walls)',games:8,engineBudgetMs:100,wins,losses,unfinished},limitations:'Small local sanity benchmark. This is not an Elo estimate or evidence of perfect play.'},null,2));
+console.log(JSON.stringify({timestamp:new Date().toISOString(),engine:'Classical tactical fallback; neural search runs in the extension',results,baselineMatch:{baseline:'Shortest-route pawn mover (never places walls)',games:8,engineBudgetMs:100,wins,losses,unfinished},limitations:'Small local sanity benchmark. This is not an Elo estimate or evidence of perfect play.'},null,2));
