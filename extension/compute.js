@@ -13,11 +13,11 @@ async function computeDocument(){
 async function computeCall(action,state,options={}){
   await computeDocument();
   const id=computeEpoch+':'+(++computeSequence);
-  computePending.set(id,options);
   let cancelled=false;
   const cancel=()=>{
     if(!cancelled&&options.shouldStop?.()){cancelled=true;chrome.runtime.sendMessage({type:'WALLZ_COMPUTE_CANCEL',id}).catch(()=>{});}
   };
+  computePending.set(id,{...options,cancel});
   const timer=options.shouldStop?setInterval(cancel,25):null;
   try{
     const response=await chrome.runtime.sendMessage({type:'WALLZ_COMPUTE',id,action,state,budgetMs:options.budgetMs});
@@ -31,4 +31,4 @@ chrome.runtime.onMessage.addListener((message,sender)=>{
   }
   return false;
 });
-globalThis.WallzCompute={init:()=>computeCall('init'),analyse:(state,options)=>computeCall('analyse',state,options),prepare:(state,options)=>computeCall('prepare',state,options)};
+globalThis.WallzCompute={cancelStale:()=>{for(const job of computePending.values())job.cancel();},init:()=>computeCall('init'),analyse:(state,options)=>computeCall('analyse',state,options),prepare:(state,options)=>computeCall('prepare',state,options)};

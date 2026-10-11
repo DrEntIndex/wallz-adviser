@@ -64,7 +64,10 @@
     const children=R.successors(state),moves=children.map(entry=>entry.move);
     if(!moves.length){node.solved=0;node.value=0;return 0;}
     node.edges=moves.map(move=>({move,prior:0,visits:0,total:0,child:null}));
+    const tactical=state.remaining[0]+state.remaining[1]<=6&&R.distances(state).some(distance=>distance<=5),proofDeadline=performance.now()+4;
     for(let i=0;i<node.edges.length;i++){const edge=node.edges[i],child=children[i].state;
+      const proof=tactical&&performance.now()<proofDeadline?E.certify(child,{budgetMs:2,protectedOnly:true}):null;
+      if(proof){edge.child=position(child);edge.child.solved=proof.value;edge.child.mate=proof.plies;edge.child.value=proof.value;continue;}
       if(R.pawnMoves(child).some(move=>Math.floor(move.to/9)===R.goal(child,child.turn))){edge.child=position(child);edge.child.solved=1;edge.child.mate=1;}
     }
     updateSolved(node);
@@ -116,7 +119,7 @@
       const edge=rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(candidate.move));
       if(edge&&edge.visits===0&&edge.child?.solved!==1&&!probes.includes(edge))probes.push(edge);
     }
-    let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield;
+    let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield-250;
     options.onProgress?.({nodes:0,phase:'search'});
     while(performance.now()+Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5)<deadline&&!options.shouldStop?.()&&rootNode.solved===null){
       let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);

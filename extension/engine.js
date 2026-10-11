@@ -307,7 +307,7 @@
     try{
       if(winner>=0)return {value:winner===turn?1:-1,plies:0};
       if(immediate(turn))return {value:1,plies:1};
-      const race=raceProof(),value=race??protectedRace();
+      const race=options.protectedOnly?null:raceProof(),value=race??protectedRace();
       if(value===null)return null;
       const move=race>90000&&!hand[1-turn]?raceWinningMove():null;
       return {value:Math.sign(value),plies:value===0?null:WIN-Math.abs(value),...(move?{move,kind:'race-bound'}:{})};

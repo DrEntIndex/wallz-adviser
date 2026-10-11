@@ -11,7 +11,7 @@ function invalidate(tabId){
   const generation=(generations.get(tabId)||0)+1;generations.set(tabId,generation);
   const previous=waiting.get(tabId);
   if(previous){clearTimeout(previous.timer);waiting.delete(tabId);foreground.delete(previous);previous.respond({id:previous.id,error:'Superseded by a newer position'});}
-  preparing.delete(tabId);return generation;
+  preparing.delete(tabId);globalThis.WallzCompute?.cancelStale?.();return generation;
 }
 function queuePreparation(){
   if(preparationActive||foreground.size||!compute()?.prepare)return;
@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((request,sender,respond)=>{
       if(state.winner==null&&state.variant==='classic'){preparing.set(tabId,{tabId,id:request.id,state,generation});queuePreparation();}
       respond({id:request.id,preparing:true});return false;
     }
-    const job={id:request.id,respond,tabId};foreground.add(job);
+    const job={id:request.id,respond,tabId};foreground.add(job);globalThis.WallzCompute?.cancelStale?.();
     job.timer=setTimeout(()=>{
       waiting.delete(tabId);
       if(compute()){
@@ -58,7 +58,7 @@ chrome.runtime.onMessage.addListener((request,sender,respond)=>{
         catch(error){respond({id:request.id,error:error.message});}
         finally{foreground.delete(job);queuePreparation();}
       }
-    },50);
+    },0);
     waiting.set(tabId,job);return true;
   }catch(error){respond({id:request.id,error:error.message});return false;}
 });

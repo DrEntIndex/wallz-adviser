@@ -122,10 +122,10 @@
       chrome.runtime.sendMessage({type:'WALLZ_PREPARE',id,state:captured.state}).catch(()=>{});
       status('Waiting for your turn');return;
     }
-    const stopped=stopSearch();status('Thinking…');
+    status('Thinking…');
     timer=setTimeout(async()=>{
       try {
-        await stopped;if(id!==requestId||!enabled)return;
+        if(id!==requestId||!enabled)return;
         const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state});
         if(id!==requestId || !enabled)return;
         if(response?.error || !response?.result)throw new Error(response?.error || 'No analysis returned');
@@ -134,7 +134,7 @@
         if(id!==requestId)return;
         status('Analysis unavailable. Refresh Wallz if you reloaded the extension.');
       }
-    },100);
+    },0);
   }
   window.addEventListener('message',event=>{
     if(event.source===window && event.origin===location.origin && event.data?.channel==='wallz-adviser-autoplay-result-v1') {

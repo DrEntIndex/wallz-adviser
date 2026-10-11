@@ -137,6 +137,17 @@
     } catch (error) { respond(error.message); }
   });
 
-  setInterval(publish, 250);
-  publish();
+  let observedBoard=null,publishTimer=null;
+  const boardObserver=new MutationObserver(()=>{
+    if(publishTimer!==null)return;
+    publishTimer=setTimeout(()=>{publishTimer=null;publish();},0);
+  });
+  function watchBoard(){
+    const board=document.querySelector('svg[aria-label="Wallz board"]');
+    if(board===observedBoard)return;
+    boardObserver.disconnect();observedBoard=board;
+    if(board)boardObserver.observe(board,{attributes:true,childList:true,subtree:true});
+  }
+  setInterval(()=>{watchBoard();publish();},250);
+  watchBoard();publish();
 })();
