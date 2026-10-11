@@ -317,5 +317,90 @@
       return {value:Math.sign(value),plies:value===0?null:WIN-Math.abs(value),...(move?{move,kind:race===null?'protected-route':'race-bound'}:{})};
     }catch(error){if(error!==TIMEOUT)throw error;return null;}
   }
-  const api={analyse,evaluate,certify};root.WallzEngine=api;if(typeof module!=='undefined')module.exports=api;
+  const threatCache=new Map();
+  function proveThreat(state,options={}){
+    const start=performance.now(),until=start+(options.budgetMs||12),key=R.stateKey(state);
+    if(options.shouldStop?.())return null;
+    if(threatCache.has(key))return threatCache.get(key);
+    if(state.winner!=null||state.variant!=='classic'||state.remaining[0]+state.remaining[1]>6)return null;
+    load(state);
+    const distances=pawn.map((p,player)=>info.maps[player][p]);
+    const player=distances[0]<distances[1]?0:distances[1]<distances[0]?1:turn;
+    const d=distances[player],enemy=1-player,map=info.maps[player];
+    if(d<=0||d>3)return null;
+    const route=[pawn[player]];
+    const expired=()=>{if(performance.now()>=until||options.shouldStop?.())throw TIMEOUT;};
+    function protectedPath(){
+      if(!hand[enemy])return true;
+      for(let i=0;i<route.length-1;i++){
+        expired();const p=route[i],q=route[i+1],x=p%9,y=p/9|0,walls=[];
+        if(Math.abs(q-p)===9){const row=q>p?y:y-1;if(x<8)walls.push(row*8+x);if(x>0)walls.push(row*8+x-1);}
+        else{const col=q>p?x:x-1;if(y<8)walls.push(64+y*8+col);if(y>0)walls.push(64+(y-1)*8+col);}
+        for(const w of walls){
+          if(blocked(w))continue;
+          const mark=ep;wallEdges(w);bits[w>>5]^=1<<(w&31);let blockable=false;
+          try{const next=boardInfo().maps[player];for(let prefix=0;prefix<=i;prefix++)if(next[route[prefix]]>=0){blockable=true;break;}}
+          finally{bits[w>>5]^=1<<(w&31);restore(mark);}
+          if(blockable)return false;
+        }
+      }
+      return true;
+    }
+    function finish(){
+      if(!protectedPath())return null;
+      const memo=new Map();
+      function force(index,opponent,attack,left){
+        expired();
+        if(index===route.length-1)return {plies:0};
+        if((opponent/9|0)===goals[enemy]||left<=0)return null;
+        const key=index+':'+opponent+':'+Number(attack)+':'+left;
+        if(memo.has(key))return memo.get(key);
+        let result=null;
+        if(attack){
+          let next=index+1;const p=route[index],q=route[next];
+          if(q===opponent){
+            next++;const target=route[next],direction=Array.from(edges.subarray(p*4,p*4+4)).indexOf(q);
+            const beyond=edges[q*4+direction];
+            const diagonal=direction<2?[2,3]:[0,1];
+            if(target===undefined||(beyond!==target&&(beyond>=0||!diagonal.some(side=>edges[q*4+side]===target)))){memo.set(key,null);return null;}
+          }
+          const child=force(next,opponent,false,left-1);
+          if(child)result={plies:child.plies+1,move:{type:'pawn',to:route[next]}};
+        }else{
+          const choices=new Set([opponent]),p=route[index];
+          for(let direction=0;direction<4;direction++){
+            const q=edges[opponent*4+direction];if(q<0)continue;
+            if(q!==p)choices.add(q);
+            else{
+              const beyond=edges[q*4+direction];if(beyond>=0)choices.add(beyond);
+              for(const side of direction<2?[2,3]:[0,1]){const lateral=edges[q*4+side];if(lateral>=0)choices.add(lateral);}
+            }
+          }
+          let longest=0;result={plies:0};
+          for(const choice of choices){
+            const child=force(index,choice,true,left-1);
+            if(!child){result=null;break;}
+            longest=Math.max(longest,child.plies+1);result={plies:longest};
+          }
+        }
+        memo.set(key,result);return result;
+      }
+      return force(0,pawn[enemy],turn===player,d*2-(turn===player?1:0));
+    }
+    function choose(p){
+      expired();
+      if(map[p]===0)return finish();
+      for(let direction=0;direction<4;direction++){
+        const q=edges[p*4+direction];if(q<0||map[q]!==map[p]-1)continue;
+        route.push(q);const proof=choose(q);route.pop();if(proof)return proof;
+      }
+      return null;
+    }
+    try{
+      const proof=choose(pawn[player]);
+      const result=proof?{value:turn===player?1:-1,plies:proof.plies,...(proof.move?{move:proof.move}:{}),kind:'tactical-route'}:null;
+      if(threatCache.size>=12000)threatCache.clear();threatCache.set(key,result);return result;
+    }catch(error){if(error!==TIMEOUT)throw error;return null;}
+  }
+  const api={analyse,evaluate,certify,proveThreat};root.WallzEngine=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

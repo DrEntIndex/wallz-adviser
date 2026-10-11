@@ -11,7 +11,7 @@ function harness(stable=false){
   const apply=(s,move)=>({...s,id:s.id+'/'+move.wall,turn:1-s.turn});
   const rules={stateKey:s=>s.id,apply,moveKey:m=>String(m.wall),distances:()=>[8,8],path:()=>[],pawnMoves:()=>[],goal:()=>8,
     successors:s=>(s.id==='root'?[0,1]:[0]).map(wall=>{const move={type:'wall',wall};return {move,state:apply(s,move)};})};
-  const context={WallzRules:rules,WallzEngine:{certify:()=>null,analyse:()=>({candidates:[],nodes:0})},
+  const context={WallzRules:rules,WallzEngine:{certify:()=>null,proveThreat:()=>null,analyse:()=>({candidates:[],nodes:0})},
     performance:{now:()=>++clock},setTimeout:fn=>{clock++;fn();},clearTimeout:()=>{}};
   const source=fs.readFileSync(require.resolve('../extension/neural.js'),'utf8');
   vm.runInNewContext(source.replace('root.WallzNeural=api;','api.timing={thinkingBudget,unsettled,searchChoice};root.WallzNeural=api;'),context);

@@ -70,6 +70,32 @@
     if(hasWin){solved(node,1,1+win);return;}
     if(all){solved(node,draw?0:-1,draw?null:1+loss);}
   }
+  function tacticalProof(state,until,shouldStop){
+    if(performance.now()>=until||shouldStop?.())return null;
+    const proof=E.proveThreat(state,{budgetMs:Math.min(2,until-performance.now()),shouldStop});
+    if(proof)return proof;
+    const us=state.turn,them=1-us,base=R.distances(state);
+    if(base[us]>3||!state.remaining[us]||!state.remaining[them]||state.remaining[0]+state.remaining[1]>6)return null;
+    const children=R.successors(state),walls=new Map(),scores=new Map();
+    for(const child of children)if(child.move.type==='wall')walls.set(child.move.wall,{...child,distances:R.distances(child.state)});
+    for(const [wall,entry] of walls){
+      const hurt=entry.distances[us]-base[us]-(entry.distances[them]-base[them])-1;if(hurt<1)continue;
+      const guards=[wall^64];
+      if(wall<64){if((wall&7)>0)guards.push(wall-1);if((wall&7)<7)guards.push(wall+1);}
+      else{if((wall&63)>7)guards.push(wall-8);if((wall&63)<56)guards.push(wall+8);}
+      for(const guard of guards){
+        const choice=walls.get(guard);if(!choice)continue;
+        const cost=choice.distances[us]-base[us]-(choice.distances[them]-base[them]),score=hurt-Math.max(0,cost);
+        if(score>0)scores.set(guard,Math.max(scores.get(guard)||0,score));
+      }
+    }
+    for(const [wall] of [...scores].sort((a,b)=>b[1]-a[1]||a[0]-b[0]).slice(0,2)){
+      if(performance.now()>=until||shouldStop?.())break;
+      const entry=walls.get(wall),answer=E.proveThreat(entry.state,{budgetMs:Math.min(2,until-performance.now()),shouldStop});
+      if(answer?.value===-1)return {value:1,plies:1+answer.plies,move:entry.move,kind:'tactical-route'};
+    }
+    return null;
+  }
   async function expand(node,predictor){
     const state=node.state,certificate=E.certify(state,{budgetMs:12});
     if(certificate){solved(node,certificate.value,certificate.plies);return node.value;}
@@ -133,12 +159,13 @@
     let deadline=start+budget-30;
     const predictor=options.predictor||predict;
     if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget,onProgress:options.onProgress,shouldStop:options.shouldStop}),engine:'race-search'};
-    const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)});
+    const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)})||tacticalProof(state,performance.now()+Math.min(10,budget/10),options.shouldStop);
     if(proof?.move){
       const baseline=R.distances(state),child=R.apply(state,proof.move),after=R.distances(child),us=state.turn;
-      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],provenWin:true,engine:proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
+      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],provenWin:true,engine:proof.kind==='tactical-route'?'exact-tactical-route':proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
     }
     const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3,shouldStop:options.shouldStop});
+    if(proof?.value===-1)return {...fallback,candidates:fallback.candidates.map(candidate=>({...candidate,score:-999,bound:'proven'})),engine:'exact-tactical-route',provenWin:false,elapsedMs:Math.round(performance.now()-start)};
     const best=fallback.candidates[0],certificate=best&&best.score>900?E.certify(R.apply(state,best.move)):null;
     if(state.winner!=null||certificate?.value===-1||state.remaining.every(n=>n===0))return {...fallback,engine:'exact-tactics',provenWin:certificate?.value===-1||best?.winNow===true};
     if(!options.predictor){
@@ -188,11 +215,19 @@
       if(options.onProgress&&completedAt-lastProgress>=250){lastProgress=completedAt;options.onProgress({nodes:simulations,phase:'search'});}
       if(completedAt-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
     }
-    const edges=rootNode.edges.slice().sort((a,b)=>{
+    const compare=(a,b)=>{
       const av=a.child?.solved===-1?2:a.child?.solved===1?-2:0,bv=b.child?.solved===-1?2:b.child?.solved===1?-2:0;
       const mate=av===2&&bv===2?(a.child.mate??Infinity)-(b.child.mate??Infinity):av===-2&&bv===-2?(b.child.mate??0)-(a.child.mate??0):0;
       return bv-av||mate||b.visits-a.visits||b.prior-a.prior;
-    });
+    };
+    const edges=rootNode.edges.slice().sort(compare),auditDeadline=Math.min(start+maximum-5,deadline+20);
+    for(const edge of edges.slice(0,8)){
+      if(rootNode.solved!==null||performance.now()>=auditDeadline||options.shouldStop?.())break;
+      if(edge.child?.solved!=null)continue;
+      const child=edge.child?.state||R.apply(state,edge.move),answer=tacticalProof(child,auditDeadline,options.shouldStop);
+      if(answer)solved(connect(rootNode,edge,child),answer.value,answer.plies);
+    }
+    edges.sort(compare);
     const baseline=R.distances(state),us=state.turn;
     const candidates=edges.slice(0,3).map(edge=>{
       const child=R.apply(state,edge.move),distances=R.distances(child),solved=edge.child?.solved;
