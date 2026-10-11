@@ -3,7 +3,8 @@
   const R=typeof module!=='undefined'?require('./rules.js'):root.WallzRules;
   const E=typeof module!=='undefined'?require('./engine.js'):root.WallzEngine;
   const directions=[[0,1],[0,-1],[-1,0],[1,0],[-1,1],[1,1],[-1,-1],[1,-1]];
-  const evaluations=new Map(),positions=new Map();
+  const evaluations=new Map(),positions=new Map(),preparedEvaluations=new Map();
+  let preparation=null;
   function encode(state){
     const out=new Float32Array(648),us=state.turn,them=1-us,flip=us===1;
     const index=p=>p%9+(flip?8-(p/9|0):p/9|0)*9;
@@ -27,10 +28,17 @@
   function init(){
     return root.WallzInference.init();
   }
-  async function predict(state){
-    const key=R.stateKey(state);if(evaluations.has(key)){const answer=evaluations.get(key);evaluations.delete(key);evaluations.set(key,answer);return answer;}
-    const answer=await root.WallzInference.evaluate(encode(state));
-    if(evaluations.size>=8192)evaluations.delete(evaluations.keys().next().value);evaluations.set(key,answer);return answer;
+  async function predict(state,preparing=false){
+    const key=R.stateKey(state),cached=evaluations.get(key)||preparedEvaluations.get(key);
+    if(cached){
+      if(!preparing){
+        if(evaluations.size>=8192&&!evaluations.has(key))evaluations.delete(evaluations.keys().next().value);
+        evaluations.delete(key);evaluations.set(key,cached);preparedEvaluations.delete(key);
+      }
+      return cached;
+    }
+    const answer=await root.WallzInference.evaluate(encode(state)),cache=preparing?preparedEvaluations:evaluations;
+    if(cache.size>=8192)cache.delete(cache.keys().next().value);cache.set(key,answer);return answer;
   }
   function position(state){
     const key=R.stateKey(state);let node=positions.get(key);
@@ -149,28 +157,80 @@
       return {...result,engine:'classical-fallback',modelError:String(error.message||error),elapsedMs:Math.round(performance.now()-start)};
     }
   }
-  async function prepare(state,options={}){
-    const start=performance.now(),deadline=start+Math.min(4000,Math.max(40,options.budgetMs||4000));
-    let lastYield=start,lastProgress=start;options.onProgress?.({nodes:0,phase:'prepare'});
-    const stopped=()=>performance.now()>=deadline||options.shouldStop?.();
-    if(state.variant!=='classic'||state.winner!=null||state.remaining.every(n=>n===0)||stopped())return {prepared:0,stopped:!!options.shouldStop?.()};
-    await init();
-    const queue=[{state,depth:0}],seen=new Set();let prepared=0,visited=0;
-    for(let index=0;index<queue.length&&!stopped();index++){
-      const entry=queue[index],key=R.stateKey(entry.state);if(seen.has(key))continue;seen.add(key);
-      const cached=evaluations.has(key),answer=await predict(entry.state);if(!cached)prepared++;visited++;
-      if(stopped())break;
-      if(entry.depth<2&&entry.state.winner==null){
-        const children=R.successors(entry.state);
-        if(entry.depth>0)children.sort((a,b)=>answer.logits[policyIndex(entry.state,b.move)]-answer.logits[policyIndex(entry.state,a.move)]);
-        for(const child of (entry.depth===0?children:children.slice(0,8)))if(child.state.winner==null)queue.push({state:child.state,depth:entry.depth+1});
-      }
-      const now=performance.now();
-      if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:visited,phase:'prepare'});}
-      if(now-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
+  function preparationOrder(a,b){return a.priority-b.priority||a.score-b.score||a.sequence-b.sequence;}
+  function enqueuePreparation(job,entry){
+    entry.sequence=job.sequence++;
+    const queue=job.queue;let index=queue.length;queue.push(entry);
+    while(index>0){
+      const parent=(index-1)>>1;if(preparationOrder(queue[parent],entry)<=0)break;
+      queue[index]=queue[parent];index=parent;
     }
-    return {prepared,visited,stopped:!!options.shouldStop?.(),elapsedMs:Math.round(performance.now()-start)};
+    queue[index]=entry;
   }
-  const api={analyse,prepare,encode,policyIndex,init,clear:()=>{evaluations.clear();positions.clear();}};
+  function takePreparation(job){
+    const queue=job.queue,entry=queue[0],last=queue.pop();
+    if(queue.length){
+      let index=0;
+      while(index*2+1<queue.length){
+        let child=index*2+1;if(child+1<queue.length&&preparationOrder(queue[child+1],queue[child])<0)child++;
+        if(preparationOrder(last,queue[child])<=0)break;
+        queue[index]=queue[child];index=child;
+      }
+      queue[index]=last;
+    }
+    return entry;
+  }
+  function schedulePreparation(job,entry){
+    const children=R.successors(entry.state);
+    if(!children.length)return;
+    const logits=children.map(child=>entry.answer.logits[policyIndex(entry.state,child.move)]),max=Math.max(...logits);
+    const weights=logits.map(value=>Math.exp(value-max)),sum=weights.reduce((a,b)=>a+b,0),depth=entry.depth+1;
+    const choices=children.map((child,index)=>({move:child.move,score:entry.score-Math.log(.9*weights[index]/sum+.1/children.length)+.35})).sort((a,b)=>a.score-b.score);
+    if(entry.depth===0){
+      for(const choice of choices)enqueuePreparation(job,{state:R.apply(entry.state,choice.move),depth,score:choice.score,priority:-1});
+    }else{
+      enqueuePreparation(job,{state:entry.state,choices:choices.slice(0,16),index:0,depth,score:choices[0].score,priority:choices[0].score});
+    }
+  }
+  async function prepare(state,options={}){
+    const start=performance.now(),deadline=start+Math.min(4000,Math.max(40,options.budgetMs||500));
+    const cancelled=()=>!!options.shouldStop?.(),expired=()=>performance.now()>=deadline||cancelled();
+    if(state.variant!=='classic'||state.winner!=null||state.remaining.every(n=>n===0)||cancelled())return {prepared:0,visited:0,stopped:cancelled(),done:true};
+    const key=R.stateKey(state);
+    if(preparation?.key!==key){
+      preparation={key,queue:[],seen:new Set(),current:null,prepared:0,visited:0,sequence:0};
+      enqueuePreparation(preparation,{state,depth:0,score:0,priority:-2});
+    }
+    const job=preparation;
+    let lastYield=start,lastProgress=start;options.onProgress?.({nodes:job.visited,phase:'prepare'});
+    await init();
+    while(!expired()&&job.visited<8192&&(job.current||job.queue.length)){
+      if(performance.now()-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();if(expired())break;}
+      if(!job.current){
+        const entry=takePreparation(job);
+        if(entry.choices){
+          const choice=entry.choices[entry.index++];
+          job.current={state:R.apply(entry.state,choice.move),depth:entry.depth,score:choice.score};
+          if(entry.index<entry.choices.length){
+            entry.score=entry.choices[entry.index].score;entry.priority=entry.score;enqueuePreparation(job,entry);
+          }
+        }else job.current=entry;
+      }
+      const entry=job.current,entryKey=R.stateKey(entry.state);
+      if(!entry.answer){
+        if(job.seen.has(entryKey)||entry.state.winner!=null){job.current=null;continue;}
+        const cached=evaluations.has(entryKey)||preparedEvaluations.has(entryKey);
+        entry.answer=await predict(entry.state,true);job.seen.add(entryKey);
+        job.visited++;if(!cached)job.prepared++;
+      }
+      if(expired())break;
+      schedulePreparation(job,entry);
+      job.current=null;
+      const now=performance.now();
+      if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:job.visited,phase:'prepare'});}
+    }
+    return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done:job.visited>=8192||(!job.current&&!job.queue.length),elapsedMs:Math.round(performance.now()-start)};
+  }
+  const api={analyse,prepare,encode,policyIndex,init,clear:()=>{evaluations.clear();positions.clear();preparedEvaluations.clear();preparation=null;}};
   root.WallzNeural=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

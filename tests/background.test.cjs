@@ -81,6 +81,19 @@ test('foreground analysis interrupts preparation and retains the full search bud
   assert.equal(preparations.length,1);assert.ok(h.responses.find(r=>r.id===2).result);
 });
 
+test('unfinished preparation keeps running across time slices until it completes',async()=>{
+  const h=harness(),preparations=[];
+  h.context.WallzNeural={prepare:(state,options)=>new Promise(resolve=>preparations.push({state,options,resolve}))};
+  h.message({type:'WALLZ_PREPARE',id:1,state:opening});await new Promise(setImmediate);
+  assert.equal(preparations[0].options.budgetMs,500);
+  preparations[0].resolve({visited:90,stopped:false,done:false});await new Promise(setImmediate);
+  assert.equal(preparations.length,2);
+  preparations[1].resolve({visited:180,stopped:false,done:false});await new Promise(setImmediate);
+  assert.equal(preparations.length,3);
+  preparations[2].resolve({visited:220,stopped:false,done:true});await new Promise(setImmediate);
+  assert.equal(preparations.length,3);
+});
+
 test('stop cancels waiting and active work without producing playable advice',async()=>{
   const h=harness(),pending=[];
   h.context.WallzNeural={prepare:(state,options)=>new Promise(resolve=>pending.push({options,resolve}))};

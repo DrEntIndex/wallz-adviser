@@ -19,9 +19,12 @@ function queuePreparation(){
   preparationActive=true;
   searches=searches.catch(()=>{}).then(async()=>{
     if(foreground.size||generations.get(job.tabId)!==job.generation)return;
-    const result=await compute().prepare(job.state,{budgetMs:4000,shouldStop:()=>foreground.size>0||generations.get(job.tabId)!==job.generation,onProgress:progress(job.tabId,job.id,job.generation)});
+    const result=await compute().prepare(job.state,{budgetMs:500,shouldStop:()=>foreground.size>0||generations.get(job.tabId)!==job.generation,onProgress:progress(job.tabId,job.id,job.generation)});
     progress(job.tabId,job.id,job.generation)({nodes:result.visited||0,phase:'prepare'});
-    if(!result.stopped&&preparing.get(job.tabId)===job)preparing.delete(job.tabId);
+    if(preparing.get(job.tabId)===job){
+      if(!result.stopped&&result.done!==false)preparing.delete(job.tabId);
+      else{preparing.delete(job.tabId);preparing.set(job.tabId,job);}
+    }
   }).catch(()=>{if(preparing.get(job.tabId)===job)preparing.delete(job.tabId);}).finally(()=>{preparationActive=false;queuePreparation();});
 }
 chrome.runtime.onMessage.addListener((request,sender,respond)=>{

@@ -96,6 +96,34 @@ test('preparation caches evaluations without adding speculative search visits',a
   }finally{N.clear();globalThis.WallzInference=inference;}
 });
 
+test('preparation resumes after its time slice without evaluating the root twice',async()=>{
+  N.clear();const inference=globalThis.WallzInference,clock=globalThis.performance;let now=0,calls=0;
+  globalThis.performance={now:()=>now};
+  globalThis.WallzInference={init:async()=>{},evaluate:async()=>{calls++;now+=50;return {logits:Float32Array.from({length:136},(_,i)=>i===0?12:0),value:0};}};
+  try{
+    const state=start(),first=await N.prepare(state,{budgetMs:40});
+    assert.equal(first.visited,1);assert.equal(first.stopped,false);assert.equal(first.done,false);
+    const second=await N.prepare(state,{budgetMs:40});
+    assert.equal(second.visited,2);assert.equal(second.done,false);assert.equal(calls,2);
+    await N.prepare(state,{budgetMs:40,shouldStop:()=>true});assert.equal(calls,2);
+  }finally{globalThis.performance=clock;N.clear();globalThis.WallzInference=inference;}
+});
+
+test('preparation covers opponent replies and continues beyond two plies',async()=>{
+  N.clear();const inference=globalThis.WallzInference,inputs=[];let calls=0;
+  globalThis.WallzInference={init:async()=>{},evaluate:async input=>{calls++;inputs.push(input);return {logits:Float32Array.from({length:136},(_,i)=>i===0?12:0),value:0};}};
+  try{
+    const state=start(),before=JSON.stringify(state);
+    const result=await N.prepare(state,{budgetMs:4000,shouldStop:()=>calls>=180});
+    assert.equal(result.visited,180);assert.equal(result.done,false);
+    const signature=input=>Buffer.from(input.buffer,input.byteOffset,input.byteLength).toString('base64');
+    const evaluated=new Set(inputs.map(signature));
+    for(const child of R.successors(state))assert.ok(evaluated.has(signature(N.encode(child.state))));
+    const deeper=R.apply(R.apply(R.apply(state,{type:'pawn',to:13}),{type:'pawn',to:67}),{type:'pawn',to:22});
+    assert.ok(evaluated.has(signature(N.encode(deeper))));assert.equal(JSON.stringify(state),before);
+  }finally{N.clear();globalThis.WallzInference=inference;}
+});
+
 test('cancelled preparation and other rulesets do not start model evaluation',async()=>{
   N.clear();const inference=globalThis.WallzInference;let calls=0;
   globalThis.WallzInference={init:async()=>{calls++;},evaluate:async()=>{throw new Error('Not needed');}};
