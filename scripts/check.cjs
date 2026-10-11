@@ -18,8 +18,6 @@ const resources={
   'vendor/ort-wasm-simd-threaded.jsep.worker.js':'f3409639351a936786e949c0f99762ad35228d4a63176893ec3511604c3ef2cf',
   'vendor/ort-wasm-simd-threaded.jsep.wasm':'0b47636210089367dc219ea498059e3f821527f7e9daca4a8f553e3ec54b0bdf',
   'models/quoridor.onnx':'d790dac68389f7602ff8a887a2385417d3c925fe22da7164c86e9226f943908d',
-  'vendor/ort.wasm.min.js':'654435ead2d823e56d5893ec53be49f6ddb7e827096561aae63501071470cf23',
-  'vendor/ort-wasm-simd.wasm':'6783fcd6647ce1b426a527c31412a9c40894552faa609e9c931b3239a3438071',
   'vendor/ort.webgpu.min.js':'46b4a580cb55be97736469358c1da8b5b6d8ffe4206f6b26dfb4e091d2ac21e2',
   'vendor/ort-wasm-simd.jsep.wasm':'d4052bde30200dcb268684067ccb748adb62c64a219b270021f26f12c24dcefe'
 };

@@ -3,6 +3,12 @@
   const DIRECTIONS = [[0,-1],[0,1],[-1,0],[1,0]];
   const REVERSE = [1,0,3,2];
   const graphCache = new Map();
+  const emptyEdges=new Int16Array(324).fill(-1);
+  for(let p=0;p<81;p++){
+    const x=p%9,y=p/9|0;
+    if(y>0)emptyEdges[p*4]=p-9;if(y<8)emptyEdges[p*4+1]=p+9;
+    if(x>0)emptyEdges[p*4+2]=p-1;if(x<8)emptyEdges[p*4+3]=p+1;
+  }
   const position = p => p.y * 9 + p.x;
   const coords = p => ({x:p % 9, y:Math.floor(p / 9)});
   const wallCoords = w => ({x:w % 8, y:Math.floor((w % 64) / 8), o:w < 64 ? 'h' : 'v'});
@@ -64,14 +70,7 @@
     const key=s.variant + ':' + s.walls.join('.');
     const cached=graphCache.get(key);
     if (cached) return cached;
-    const edges=new Int16Array(81*4).fill(-1);
-    for (let p=0;p<81;p++) {
-      const a=coords(p);
-      DIRECTIONS.forEach(([dx,dy],d)=>{
-        const x=a.x+dx, y=a.y+dy;
-        if (x>=0 && x<9 && y>=0 && y<9) edges[p*4+d]=y*9+x;
-      });
-    }
+    const edges=emptyEdges.slice();
     function block(p,d) { const q=edges[p*4+d]; edges[p*4+d]=-1; if(q>=0) edges[q*4+REVERSE[d]]=-1; }
     for (const w of s.walls) {
       const a=wallCoords(w), p=a.y*9+a.x;

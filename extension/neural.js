@@ -80,7 +80,7 @@
     for(let i=0;i<node.edges.length;i++){const edge=node.edges[i],child=children[i].state;
       const proof=tactical&&performance.now()<proofDeadline?E.certify(child,{budgetMs:2,protectedOnly:true}):null;
       if(proof){solved(connect(node,edge,child),proof.value,proof.plies);continue;}
-      if(R.pawnMoves(child).some(move=>Math.floor(move.to/9)===R.goal(child,child.turn))){solved(connect(node,edge,child),1,1);}
+      if(Math.abs((child.pawns[child.turn]/9|0)-R.goal(child,child.turn))<=2&&R.pawnMoves(child).some(move=>Math.floor(move.to/9)===R.goal(child,child.turn))){solved(connect(node,edge,child),1,1);}
     }
     updateSolved(node);
     if(node.solved!==null){node.value=node.solved;return node.value;}

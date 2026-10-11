@@ -1,6 +1,6 @@
 {
   "name": "wallz-adviser",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "license": "MIT",
   "description": "Local Wallz.gg bot and Chrome extension with move and wall suggestions, optional autoplay, and CPU/WebGPU acceleration",

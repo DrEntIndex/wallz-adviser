@@ -25,13 +25,13 @@
     const current = attached.stateNode?.current;
     if (!current) return null;
 
-    const stack = [{ fiber: current, path: [] }];
+    const stack = [{ fiber: current, parent: null }];
     let visited = 0;
     while (stack.length && ++visited < 30000) {
-      const { fiber, path } = stack.pop();
-      if (fiber.stateNode === board) return [...path, fiber];
-      if (fiber.sibling) stack.push({ fiber: fiber.sibling, path });
-      if (fiber.child) stack.push({ fiber: fiber.child, path: [...path, fiber] });
+      const entry=stack.pop(),{fiber}=entry;
+      if(fiber.stateNode===board){const path=[];for(let node=entry;node;node=node.parent)path.push(node.fiber);return path.reverse();}
+      if(fiber.sibling)stack.push({fiber:fiber.sibling,parent:entry.parent});
+      if(fiber.child)stack.push({fiber:fiber.child,parent:entry});
     }
     return null;
   }

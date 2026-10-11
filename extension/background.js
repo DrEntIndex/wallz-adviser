@@ -1,6 +1,7 @@
 'use strict';
-importScripts('rules.js','engine.js','vendor/ort.webgpu.min.js','inference.js','neural.js');
+importScripts('rules.js','engine.js');
 if(chrome.offscreen&&chrome.runtime.getContexts)importScripts('compute.js');
+else importScripts('vendor/ort.webgpu.min.js','inference.js','neural.js');
 const waiting=new Map(),generations=new Map(),preparing=new Map(),foreground=new Set();
 const compute=()=>globalThis.WallzCompute||globalThis.WallzNeural;
 function progress(tabId,id,generation){return update=>{if(generations.get(tabId)===generation)chrome.tabs.sendMessage(tabId,{type:'WALLZ_PROGRESS',id,...update}).catch(()=>{});};}
