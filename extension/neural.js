@@ -42,8 +42,20 @@
   }
   function position(state){
     const key=R.stateKey(state);let node=positions.get(key);
-    if(!node){node={key,state,edges:null,visits:0,solved:null,mate:null,value:0};positions.set(key,node);}
+    if(!node){node={key,state,edges:null,visits:0,solved:null,mate:null,value:0,parents:new Set()};positions.set(key,node);}
     return node;
+  }
+  const proofQueue=[];let resolving=false;
+  function solved(node,value,mate){
+    if(node.solved!==null)return;
+    node.solved=value;node.mate=mate;node.value=value;proofQueue.push(node);
+    if(resolving)return;resolving=true;
+    try{while(proofQueue.length){const child=proofQueue.pop();for(const parent of child.parents)updateSolved(parent);}}
+    finally{resolving=false;}
+  }
+  function connect(node,edge,state){
+    if(!edge.child){edge.child=position(state);edge.child.parents.add(node);}
+    return edge.child;
   }
   function updateSolved(node){
     if(!node.edges?.length||node.solved!==null)return;
@@ -55,20 +67,20 @@
       if(child.solved===0)draw=true;
       loss=Math.max(loss,child.mate);
     }
-    if(hasWin){node.solved=1;node.mate=1+win;return;}
-    if(all){node.solved=draw?0:-1;node.mate=draw?null:1+loss;}
+    if(hasWin){solved(node,1,1+win);return;}
+    if(all){solved(node,draw?0:-1,draw?null:1+loss);}
   }
   async function expand(node,predictor){
     const state=node.state,certificate=E.certify(state,{budgetMs:12});
-    if(certificate){node.solved=certificate.value;node.mate=certificate.plies;node.value=certificate.value;return node.value;}
+    if(certificate){solved(node,certificate.value,certificate.plies);return node.value;}
     const children=R.successors(state),moves=children.map(entry=>entry.move);
-    if(!moves.length){node.solved=0;node.value=0;return 0;}
+    if(!moves.length){solved(node,0,null);return 0;}
     node.edges=moves.map(move=>({move,prior:0,visits:0,total:0,child:null}));
     const tactical=state.remaining[0]+state.remaining[1]<=6&&R.distances(state).some(distance=>distance<=5),proofDeadline=performance.now()+4;
     for(let i=0;i<node.edges.length;i++){const edge=node.edges[i],child=children[i].state;
       const proof=tactical&&performance.now()<proofDeadline?E.certify(child,{budgetMs:2,protectedOnly:true}):null;
-      if(proof){edge.child=position(child);edge.child.solved=proof.value;edge.child.mate=proof.plies;edge.child.value=proof.value;continue;}
-      if(R.pawnMoves(child).some(move=>Math.floor(move.to/9)===R.goal(child,child.turn))){edge.child=position(child);edge.child.solved=1;edge.child.mate=1;}
+      if(proof){solved(connect(node,edge,child),proof.value,proof.plies);continue;}
+      if(R.pawnMoves(child).some(move=>Math.floor(move.to/9)===R.goal(child,child.turn))){solved(connect(node,edge,child),1,1);}
     }
     updateSolved(node);
     if(node.solved!==null){node.value=node.solved;return node.value;}
@@ -99,7 +111,7 @@
     const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)});
     if(proof?.move){
       const baseline=R.distances(state),child=R.apply(state,proof.move),after=R.distances(child),us=state.turn;
-      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],engine:'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
+      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],engine:proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
     }
     const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3,shouldStop:options.shouldStop});
     const best=fallback.candidates[0],certificate=best&&best.score>900?E.certify(R.apply(state,best.move)):null;
@@ -125,7 +137,7 @@
       let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
       while(node.edges&&node.solved===null&&path.length<100){
         const edge=node===rootNode&&probes.length?probes.shift():select(node);if(!edge)break;
-        if(!edge.child)edge.child=position(R.apply(node.state,edge.move));
+        if(!edge.child)connect(node,edge,R.apply(node.state,edge.move));
         path.push({node,edge});node=edge.child;
         if(seen.has(node.key)){cycle=true;break;}seen.add(node.key);
         if(performance.now()>=deadline)break;

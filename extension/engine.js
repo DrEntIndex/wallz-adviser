@@ -145,31 +145,35 @@
   function protectedRace() {
     const key=lo+':'+hi;
     function score(mate){return mate===0?null:mate>0?WIN-sp-mate:-WIN+sp-mate;}
-    if(proofCache.has(key))return score(proofCache.get(key));
-    let mate=0;
+    if(proofCache.has(key))return score(proofCache.get(key).mate);
+    let mate=0,move=null;
     for(let player=0;player<2;player++){
       const enemy=1-player,map=info.maps[player],d=map[pawn[player]],b=info.maps[enemy][pawn[enemy]];
       if(d<=0||d>5||(player===turn?d>b:d>=b))continue;
-      const route=[pawn[player]];let protectedPath=true;
-      while(map[route.at(-1)]>0&&protectedPath){check();const p=route.at(-1);let direction=-1;
-        for(let k=0;k<4;k++){const q=edges[p*4+k];if(q>=0&&map[q]===map[p]-1){direction=k;route.push(q);break;}}
-        if(direction<0){protectedPath=false;break;}
-        if(!hand[enemy])continue;
+      reach.fill(-1);let h=0,t=0;queue[t++]=pawn[enemy];reach[pawn[enemy]]=0;
+      while(h<t){const p=queue[h++];for(let k=0;k<4;k++){const q=edges[p*4+k];if(q>=0&&reach[q]<0){reach[q]=reach[p]+1;queue[t++]=q;}}}
+      const safe=new Int8Array(81).fill(-1),choice=new Int16Array(81).fill(-1);
+      function protectedStep(p,direction){
+        if(!hand[enemy])return true;
         const x=p%9,y=p/9|0,walls=[];
         if(direction<2){const row=direction===1?y:y-1;if(x<8)walls.push(row*8+x);if(x>0)walls.push(row*8+x-1);}
         else{const col=direction===3?x:x-1;if(y<8)walls.push(64+y*8+col);if(y>0)walls.push(64+(y-1)*8+col);}
-        for(const w of walls){if(blocked(w))continue;const mark=ep;wallEdges(w);bits[w>>5]^=1<<(w&31);
-          try{if(boardInfo().maps[player][pawn[player]]>=0)protectedPath=false;}finally{bits[w>>5]^=1<<(w&31);restore(mark);}
-          if(!protectedPath)break;
+        for(const w of walls){if(blocked(w))continue;const mark=ep;wallEdges(w);bits[w>>5]^=1<<(w&31);let blockable;
+          try{blockable=boardInfo().maps[player][pawn[player]]>=0;}finally{bits[w>>5]^=1<<(w&31);restore(mark);}
+          if(blockable)return false;
         }
+        return true;
       }
-      if(!protectedPath)continue;
-      reach.fill(-1);let h=0,t=0;queue[t++]=pawn[enemy];reach[pawn[enemy]]=0;
-      while(h<t){const p=queue[h++];for(let k=0;k<4;k++){const q=edges[p*4+k];if(q>=0&&reach[q]<0){reach[q]=reach[p]+1;queue[t++]=q;}}}
-      if(route.some(p=>reach[p]>=0&&reach[p]<=d+1))continue;
-      const plies=d*2-(player===turn?1:0);mate=player===turn?plies:-plies;break;
+      function finish(p){
+        check();if(reach[p]>=0&&reach[p]<=d+1)return false;
+        if(map[p]===0)return true;if(safe[p]>=0)return safe[p]===1;
+        for(let k=0;k<4;k++){const q=edges[p*4+k];if(q>=0&&map[q]===map[p]-1&&protectedStep(p,k)&&finish(q)){safe[p]=1;choice[p]=q;return true;}}
+        safe[p]=0;return false;
+      }
+      if(!finish(pawn[player]))continue;
+      const plies=d*2-(player===turn?1:0);mate=player===turn?plies:-plies;if(player===turn)move={type:'pawn',to:choice[pawn[player]]};break;
     }
-    if(proofCache.size>=24000)proofCache.delete(proofCache.keys().next().value);proofCache.set(key,mate);return score(mate);
+    if(proofCache.size>=24000)proofCache.delete(proofCache.keys().next().value);proofCache.set(key,{mate,move});return score(mate);
   }
   function endgame() {
     const key=boardKey(),cached=endgames.get(key);if(cached)return cached;
@@ -309,8 +313,8 @@
       if(immediate(turn))return {value:1,plies:1};
       const race=options.protectedOnly?null:raceProof(),value=race??protectedRace();
       if(value===null)return null;
-      const move=race>90000&&!hand[1-turn]?raceWinningMove():null;
-      return {value:Math.sign(value),plies:value===0?null:WIN-Math.abs(value),...(move?{move,kind:'race-bound'}:{})};
+      const move=race>90000&&!hand[1-turn]?raceWinningMove():race===null&&value>90000?proofCache.get(lo+':'+hi)?.move:null;
+      return {value:Math.sign(value),plies:value===0?null:WIN-Math.abs(value),...(move?{move,kind:race===null?'protected-route':'race-bound'}:{})};
     }catch(error){if(error!==TIMEOUT)throw error;return null;}
   }
   const api={analyse,evaluate,certify};root.WallzEngine=api;if(typeof module!=='undefined')module.exports=api;
