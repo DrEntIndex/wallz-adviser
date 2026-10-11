@@ -19,7 +19,7 @@ test('foreground requests coalesce without a fixed startup delay',async()=>{
   assert.ok(timers.every(timer=>timer.delay===0));
   for(const timer of timers)if(!timer.cancelled)timer.fn();
   await new Promise(setImmediate);
-  assert.equal(analyses.length,1);assert.equal(analyses[0].options.budgetMs,3000);
+  assert.equal(analyses.length,1);assert.equal(analyses[0].options.budgetMs,3000);assert.equal(analyses[0].options.maxBudgetMs,6000);
   assert.ok(responses.find(response=>response.id===1).error);
   assert.ok(responses.find(response=>response.id===2).result);
 });

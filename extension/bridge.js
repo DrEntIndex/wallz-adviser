@@ -5,6 +5,17 @@
   const CHANNEL = 'wallz-adviser-position-v1';
   let previous = '', lastSent = 0;
   let autoplayEnabled = false, playGeneration = 0, lastPressGeneration = 0, lastPlayed = '';
+  let autoGGEnabled=false,gameSequence=0,trackedGame=null;
+  const sentGG=new Set();
+
+  function trackGame(room){
+    const key=String(room.matchId||room.code||''),count=Array.isArray(room.moves)?room.moves.length:null,winner=room.game.winner??null;
+    if(!key)return null;
+    if(!trackedGame||trackedGame.key!==key||(count!==null&&trackedGame.count!==null&&count<trackedGame.count)||(trackedGame.winner!==null&&winner===null)){
+      trackedGame={key,id:key+':'+Date.now()+':'+(++gameSequence),count,winner};
+    }else{trackedGame.count=count;trackedGame.winner=winner;}
+    return trackedGame.id;
+  }
 
   function currentAncestors(board) {
     const key = Object.keys(board).find(k => k.startsWith('__reactFiber$'));
@@ -37,10 +48,13 @@
     if (!boardProps) return { mode: 'unknown', reason: 'Could not read the current board.' };
 
     const s = boardProps.state;
+    const online=props.find(p=>p.snapshot?.game===s&&typeof p.onSendChat==='function');
+    const gameId=online?trackGame(online.snapshot):null;
     const copy = p => ({ x: p.x, y: p.y });
 
     return {
       mode: 'any',
+      ...(gameId?{gameId,chatAvailable:online.socketConnected!==false&&!online.connecting}:{}),
       player: boardProps.bottomPlayer,
       controllable: boardProps.controllable,
       flipped: s.variant !== 'race' && boardProps.bottomPlayer === 'p1',
@@ -135,6 +149,27 @@
         } catch (error) { respond(error.message); }
       }));
     } catch (error) { respond(error.message); }
+  });
+
+  window.addEventListener('message',event=>{
+    if(event.source!==window||event.origin!==location.origin||event.data?.channel!=='wallz-adviser-chat-v1')return;
+    const request=event.data;
+    if(request.type==='enable'){autoGGEnabled=request.enabled===true;return;}
+    if(request.type!=='gg'||!autoGGEnabled)return;
+    const respond=error=>window.postMessage({channel:'wallz-adviser-chat-result-v1',id:request.id,error},location.origin);
+    try{
+      const current=snapshot();
+      if(!current.gameId||!current.chatAvailable||!current.controllable||current.state?.winner!=null||JSON.stringify(current)!==JSON.stringify(request.position))throw new Error('Position changed.');
+      if(sentGG.has(current.gameId))throw new Error('GG was already sent this game.');
+      const board=document.querySelector('svg[aria-label="Wallz board"]');
+      const online=currentAncestors(board)?.map(f=>f.memoizedProps).find(p=>typeof p?.onSendChat==='function'&&p.snapshot?.code&&p.snapshot.game?.turn===current.state.turn);
+      if(!online)throw new Error('Game chat is unavailable.');
+      if(sentGG.size>=64)sentGG.delete(sentGG.values().next().value);
+      sentGG.add(current.gameId);
+      Promise.resolve(online.onSendChat('GG')).then(reply=>{
+        respond(reply?.ok===true?null:String(reply?.error||'Chat did not confirm the message.'));
+      },()=>respond('Chat did not confirm the message.'));
+    }catch(error){respond(error.message);}
   });
 
   let observedBoard=null,publishTimer=null;

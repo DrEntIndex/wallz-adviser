@@ -13,13 +13,14 @@
       .toolbar{display:flex;justify-content:flex-end;align-items:center;gap:9px}.counter{font-size:11px;color:#adc2b5;font-variant-numeric:tabular-nums;white-space:nowrap}
       .panel{width:196px;max-width:calc(100vw - 28px);margin-bottom:8px;padding:12px;background:#14211ff5;border:1px solid #395650;border-radius:12px;box-shadow:0 8px 24px #0005}
       label{color:#bbcdc3}
-      .autoplay{display:flex;align-items:center;gap:8px;cursor:pointer}.autoplay input{accent-color:#80f4c0}
+      .autoplay{display:flex;align-items:center;gap:8px;cursor:pointer}.autoplay+.autoplay{margin-top:10px}.autoplay input{accent-color:#80f4c0}
       .pause{background:#21332c;border:1px solid #41594c;border-radius:6px;padding:6px 8px;width:100%;margin-top:10px}
       .status{font-size:11px;line-height:1.4;color:#adc2b5;margin:10px 0 0;overflow-wrap:anywhere}
       [hidden]{display:none!important}button:focus-visible{outline:2px solid #80f4c0;outline-offset:3px}
     </style>
     <section class="panel" aria-label="Adviser settings" hidden>
       <label class="autoplay"><input id="autoplay" type="checkbox">Autoplay best move</label>
+      <label class="autoplay" title="Send GG once when your win is proven"><input id="autogg" type="checkbox">Auto GG</label>
       <button class="pause">Pause</button><p class="status" role="status" aria-live="polite">Reading board…</p>
     </section>
     <div class="toolbar"><span class="counter" title="Positions explored in the current search" aria-label="0 positions explored">0 explored</span><button class="trigger" aria-label="Adviser controls" aria-expanded="false" title="Adviser controls">⚙︎</button></div>`;
@@ -35,7 +36,22 @@
   let observedBoard=null;
   window.addEventListener('pagehide',()=>{cancelAutoplay();stopSearch();});
   let lastAutoPosition='',playId=0,pendingPlay=null,playTimer=null,retryTimer=null,playFailures=0;
+  let ggId=0,pendingGG=null;
+  const ggAttempts=new Set();
   const resize=new ResizeObserver(align);
+
+  function syncAutoGG(){
+    window.postMessage({channel:'wallz-adviser-chat-v1',type:'enable',enabled:enabled&&$('#autogg').checked},location.origin);
+  }
+  function autoGG(){
+    const choice=result?.candidates?.[0],us=captured?.player==='p1'?0:captured?.player==='p2'?1:-1;
+    const proven=result?.provenWin===true||choice?.winNow===true||(choice?.bound==='proven'&&choice.score>0);
+    if(!enabled||!$('#autogg').checked||!captured?.controllable||!captured.chatAvailable||!captured.gameId||!position||position.winner!=null||position.turn!==us||!proven)return;
+    if(ggAttempts.has(captured.gameId))return;
+    if(ggAttempts.size>=64)ggAttempts.delete(ggAttempts.values().next().value);
+    ggAttempts.add(captured.gameId);pendingGG={id:++ggId,gameId:captured.gameId};
+    window.postMessage({channel:'wallz-adviser-chat-v1',type:'gg',id:pendingGG.id,position:captured},location.origin);
+  }
 
   function syncAutoplay() {
     window.postMessage({channel:'wallz-adviser-autoplay-v1',type:'enable',enabled:enabled && $('#autoplay').checked},location.origin);
@@ -129,7 +145,7 @@
         const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state});
         if(id!==requestId || !enabled)return;
         if(response?.error || !response?.result)throw new Error(response?.error || 'No analysis returned');
-        result=response.result;searchCounter(result.nodes, 'search',result.inference);status('');draw();autoplay();
+        result=response.result;searchCounter(result.nodes, 'search',result.inference);status('');draw();autoGG();autoplay();
       } catch(error) {
         if(id!==requestId)return;
         status('Analysis unavailable. Refresh Wallz if you reloaded the extension.');
@@ -137,6 +153,12 @@
     },0);
   }
   window.addEventListener('message',event=>{
+    if(event.source===window&&event.origin===location.origin&&event.data?.channel==='wallz-adviser-chat-result-v1'){
+      if(event.data.id!==pendingGG?.id)return;
+      const gameId=pendingGG.gameId;pendingGG=null;
+      if(event.data.error&&enabled&&$('#autogg').checked&&captured?.gameId===gameId)status('Auto GG: '+String(event.data.error));
+      return;
+    }
     if(event.source===window && event.origin===location.origin && event.data?.channel==='wallz-adviser-autoplay-result-v1') {
       if(event.data.id!==pendingPlay)return;
       clearTimeout(playTimer);pendingPlay=null;
@@ -162,8 +184,9 @@
   function setMenu(open){$('.panel').hidden=!open;$('.trigger').setAttribute('aria-expanded',String(open));}
   function toggleMenu(){setMenu($('.panel').hidden);}
   $('.trigger').addEventListener('click',toggleMenu);
-  $('.pause').addEventListener('click',()=>{enabled=!enabled;$('.pause').textContent=enabled?'Pause':'Resume';cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();analyse();});
+  $('.pause').addEventListener('click',()=>{enabled=!enabled;$('.pause').textContent=enabled?'Pause':'Resume';cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();syncAutoGG();analyse();});
   $('#autoplay').addEventListener('change',()=>{cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();if($('#autoplay').checked)autoplay();else status(enabled?'':'Paused');});
+  $('#autogg').addEventListener('change',()=>{syncAutoGG();if($('#autogg').checked)autoGG();});
   chrome.runtime.onMessage.addListener(message=>{
     if(message?.type==='WALLZ_TOGGLE')toggleMenu();
     if(message?.type==='WALLZ_PROGRESS'&&message.id===requestId&&enabled&&position?.winner==null)searchCounter(message.nodes,message.phase);

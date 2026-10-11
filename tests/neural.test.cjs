@@ -29,7 +29,7 @@ test('search retains every legal root wall even with concentrated learned priors
   N.clear();const s=start(),before=JSON.stringify(s);
   const predictor=async()=>({logits:Float32Array.from({length:136},(_,i)=>i===0?8:0),value:0});
   const result=await N.analyse(s,{budgetMs:200,predictor});
-  assert.equal(result.engine,'neural-puct');assert.equal(result.legalCount,131);assert.equal(result.wallWidth,128);
+  assert.equal(result.engine,'neural-puct');assert.equal(result.provenWin,false);assert.equal(result.legalCount,131);assert.equal(result.wallWidth,128);
   assert.ok(result.simulations>0);assert.ok(result.searchedCount>=8);
   for(const c of result.candidates)assert.doesNotThrow(()=>R.apply(s,c.move));
   assert.equal(JSON.stringify(s),before);

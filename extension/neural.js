@@ -104,18 +104,43 @@
     }
     return best;
   }
+  function thinkingBudget(options){
+    const normal=Math.min(3000,Math.max(40,Number(options.budgetMs)||3000));
+    return {normal,maximum:Math.min(6000,Math.max(normal,Number(options.maxBudgetMs)||normal))};
+  }
+  function searchChoice(node){
+    let first=null,second=null;
+    const ahead=(a,b)=>!b||a.visits>b.visits||(a.visits===b.visits&&a.prior>b.prior);
+    for(const edge of node.edges){
+      if(edge.child?.solved===1)continue;
+      if(ahead(edge,first)){second=first;first=edge;}else if(ahead(edge,second))second=edge;
+    }
+    if(!first)return null;
+    const value=edge=>edge.child?.solved===0?0:edge.visits?edge.total/edge.visits:node.value;
+    return {move:R.moveKey(first.move),value:value(first),visits:first.visits,challengerValue:second?value(second):null,challengerVisits:second?.visits||0};
+  }
+  function unsettled(samples){
+    if(samples.length<2)return true;
+    const latest=samples.at(-1);if(!latest)return false;
+    if(samples.some(sample=>sample.move!==latest.move||Math.abs(sample.value-latest.value)>=.08))return true;
+    if(latest.challengerValue===null)return false;
+    const close=latest.challengerVisits>=Math.max(8,latest.visits*.75)&&Math.abs(latest.challengerValue-latest.value)<=.08;
+    const promising=latest.challengerVisits>=Math.max(8,latest.visits*.2)&&latest.challengerValue>latest.value+.05;
+    return close||promising;
+  }
   async function search(state,options={}){
-    const start=performance.now(),budget=Math.min(3000,Math.max(40,options.budgetMs||3000)),deadline=start+budget-30;
+    const start=performance.now(),{normal:budget,maximum}=thinkingBudget(options),hardDeadline=start+maximum-30;
+    let deadline=start+budget-30;
     const predictor=options.predictor||predict;
     if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget,onProgress:options.onProgress,shouldStop:options.shouldStop}),engine:'race-search'};
     const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)});
     if(proof?.move){
       const baseline=R.distances(state),child=R.apply(state,proof.move),after=R.distances(child),us=state.turn;
-      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],engine:proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
+      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],provenWin:true,engine:proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
     }
     const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3,shouldStop:options.shouldStop});
     const best=fallback.candidates[0],certificate=best&&best.score>900?E.certify(R.apply(state,best.move)):null;
-    if(state.winner!=null||certificate?.value===-1||state.remaining.every(n=>n===0))return {...fallback,engine:'exact-tactics'};
+    if(state.winner!=null||certificate?.value===-1||state.remaining.every(n=>n===0))return {...fallback,engine:'exact-tactics',provenWin:certificate?.value===-1||best?.winNow===true};
     if(!options.predictor){
       let timeout;
       try{await Promise.race([init(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Model startup timed out')),Math.max(1,deadline-performance.now()));})]);}
@@ -125,15 +150,24 @@
     if(positions.size>12000)positions.clear();
     const rootNode=position(state);
     if(!rootNode.edges&&rootNode.solved===null)await expand(rootNode,predictor);
-    if(!rootNode.edges)return {...fallback,engine:'exact-tactics',elapsedMs:Math.round(performance.now()-start)};
+    if(!rootNode.edges)return {...fallback,engine:'exact-tactics',provenWin:rootNode.solved===1||best?.winNow===true,elapsedMs:Math.round(performance.now()-start)};
     const probes=rootNode.edges.filter(edge=>edge.visits===0&&edge.child?.solved!==1).sort((a,b)=>b.prior-a.prior).slice(0,8);
     for(const candidate of fallback.candidates){
       const edge=rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(candidate.move));
       if(edge&&edge.visits===0&&edge.child?.solved!==1&&!probes.includes(edge))probes.push(edge);
     }
-    let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield-250;
+    let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield-250,lastSample=lastYield;
+    const samples=[];
+    const sample=()=>{const choice=searchChoice(rootNode);if(choice){samples.push(choice);if(samples.length>4)samples.shift();}};
     options.onProgress?.({nodes:0,phase:'search'});
-    while(performance.now()+Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5)<deadline&&!options.shouldStop?.()&&rootNode.solved===null){
+    while(!options.shouldStop?.()&&rootNode.solved===null){
+      const now=performance.now(),reserve=Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5);
+      if(now+reserve>=deadline){
+        if(maximum>budget){sample();lastSample=now;}
+        if(deadline>=hardDeadline||!unsettled(samples))break;
+        deadline=Math.min(hardDeadline,deadline+500);
+        if(now+reserve>=deadline)break;
+      }
       let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
       while(node.edges&&node.solved===null&&path.length<100){
         const edge=node===rootNode&&probes.length?probes.shift():select(node);if(!edge)break;
@@ -149,9 +183,10 @@
       node.visits++;
       for(let i=path.length-1;i>=0;i--){value=-value;const entry=path[i];entry.edge.visits++;entry.edge.total+=value;entry.node.visits++;updateSolved(entry.node);}
       simulations++;maxDepth=Math.max(maxDepth,path.length);
-      const now=performance.now();
-      if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:simulations,phase:'search'});}
-      if(now-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
+      const completedAt=performance.now();
+      if(maximum>budget&&completedAt-lastSample>=250){lastSample=completedAt;sample();}
+      if(options.onProgress&&completedAt-lastProgress>=250){lastProgress=completedAt;options.onProgress({nodes:simulations,phase:'search'});}
+      if(completedAt-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
     }
     const edges=rootNode.edges.slice().sort((a,b)=>{
       const av=a.child?.solved===-1?2:a.child?.solved===1?-2:0,bv=b.child?.solved===-1?2:b.child?.solved===1?-2:0;
@@ -163,7 +198,7 @@
       const child=R.apply(state,edge.move),distances=R.distances(child),solved=edge.child?.solved;
       return {move:edge.move,score:solved===-1?999:solved===1?-999:(edge.visits?edge.total/edge.visits:rootNode.value)*10,bound:solved==null?'estimate':'proven',winNow:child.winner===us,reply:null,ownDistance:distances[us],opponentDistance:distances[1-us],ownDelay:distances[us]-baseline[us],opponentDelay:distances[1-us]-baseline[1-us],route:R.path(child,us),visits:edge.visits,prior:edge.prior};
     });
-    return {candidates,engine:'neural-puct',depth:maxDepth,nodes:simulations,simulations,elapsedMs:Math.round(performance.now()-start),legalCount:rootNode.edges.length,searchedCount:rootNode.edges.filter(e=>e.visits).length,wallWidth:rootNode.edges.filter(e=>e.move.type==='wall').length,paths:baseline,...(!options.predictor?{inference:root.WallzInference.info()}: {})};
+    return {candidates,engine:'neural-puct',provenWin:rootNode.solved===1,depth:maxDepth,nodes:simulations,simulations,searchBudgetMs:Math.round(deadline-start+30),elapsedMs:Math.round(performance.now()-start),legalCount:rootNode.edges.length,searchedCount:rootNode.edges.filter(e=>e.visits).length,wallWidth:rootNode.edges.filter(e=>e.move.type==='wall').length,paths:baseline,...(!options.predictor?{inference:root.WallzInference.info()}: {})};
   }
   async function analyse(state,options={}){
     const start=performance.now();

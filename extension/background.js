@@ -46,7 +46,7 @@ chrome.runtime.onMessage.addListener((request,sender,respond)=>{
         searches=searches.catch(()=>{}).then(async()=>{
           if(generations.get(tabId)!==generation){respond({id:request.id,error:'Superseded by a newer position'});return;}
           try{
-            const result=await compute().analyse(state,{budgetMs:3000,shouldStop:()=>generations.get(tabId)!==generation,onProgress:progress(tabId,request.id,generation)});
+            const result=await compute().analyse(state,{budgetMs:3000,maxBudgetMs:6000,shouldStop:()=>generations.get(tabId)!==generation,onProgress:progress(tabId,request.id,generation)});
             respond(generations.get(tabId)===generation?{id:request.id,result}:{id:request.id,error:'Superseded by a newer position'});
           }catch(error){
             if(globalThis.WallzCompute&&generations.get(tabId)===generation){try{respond({id:request.id,result:{...WallzEngine.analyse(state,{budgetMs:3000,onProgress:progress(tabId,request.id,generation)}),engine:'classical-fallback',modelError:error.message}});}catch(fallback){respond({id:request.id,error:fallback.message});}}

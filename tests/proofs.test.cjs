@@ -28,7 +28,7 @@ test('an alternative protected route defeats every legal opponent reply',()=>{
 test('a certified route returns its winning move without model inference',async()=>{
   N.clear();let calls=0;
   const result=await N.analyse(route(),{budgetMs:300,predictor:async()=>{calls++;throw new Error('Inference should not be needed');}});
-  assert.equal(result.engine,'exact-protected-route');assert.equal(result.candidates[0].bound,'proven');
+  assert.equal(result.engine,'exact-protected-route');assert.equal(result.provenWin,true);assert.equal(result.candidates[0].bound,'proven');
   assert.deepEqual(result.candidates[0].move,{type:'pawn',to:62});assert.equal(calls,0);
 });
 
