@@ -161,7 +161,7 @@
     timer=setTimeout(async()=>{
       try {
         if(id!==requestId||!enabled)return;
-        const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state,quickMode:$('#quickmode').checked});
+        const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state,quickMode:$('#quickmode').checked,...(captured.opening?{opening:captured.opening}:{})});
         if(id!==requestId || !enabled)return;
         if(response?.error || !response?.result)throw new Error(response?.error || 'No analysis returned');
         result=response.result;searchCounter(result.nodes, 'search',result.inference);status('');draw();autoGG();autoplay();

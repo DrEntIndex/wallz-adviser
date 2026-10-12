@@ -190,10 +190,28 @@
     return [...scores].sort((a,b)=>b[1]-a[1]||a[0]-b[0]).slice(0,4).map(([wall])=>({type:'wall',wall}));
   }
 
+  function openingMove(state,opening){
+    if(!opening||![0,1].includes(opening.starter)||!Number.isInteger(opening.ply)||opening.ply<0||opening.ply>3||state.variant!=='classic'||state.winner!=null||state.walls.length||state.remaining[0]!==10||state.remaining[1]!==10)return null;
+    const {starter,ply}=opening,a=Math.floor((ply+(starter===0?1:0))/2),b=Math.floor((ply+(starter===1?1:0))/2);
+    if(state.turn!==(ply%2?1-starter:starter)||state.pawns[0]!==4+a*9||state.pawns[1]!==76-b*9)return null;
+    const to=state.pawns[state.turn]+(state.turn===0?9:-9);
+    return R.pawnMoves(state).find(move=>move.to===to)||null;
+  }
+  function openingSettled(node,move,samples){
+    const key=R.moveKey(move);
+    if(samples.length<3||samples.some(sample=>sample.move!==key||!Number.isFinite(sample.value)))return false;
+    const forward=node.edges.find(edge=>R.moveKey(edge.move)===key);
+    if(!forward||!Number.isFinite(forward.visits)||!Number.isFinite(forward.prior)||!Number.isFinite(forward.total)||forward.visits<16||forward.prior<.6||forward.child?.solved!=null)return false;
+    const current=searchChoice(node);
+    if(!current||current.move!==key||unsettled([...samples,current]))return false;
+    const value=forward.total/forward.visits;
+    return node.edges.every(edge=>edge===forward||(edge.child?.solved!==-1&&edge.visits<=forward.visits*.25&&(edge.visits<4||edge.total/edge.visits<=value+.02)));
+  }
+
   async function search(state,options={}){
     const start=performance.now(),{normal:budget,maximum}=thinkingBudget(options),hardDeadline=start+maximum-30;
     let deadline=start+budget-30;
-    const predictor=options.predictor||predict;
+    const predictor=options.predictor||predict,opening=budget>=1000?openingMove(state,options.opening):null;
     if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget,onProgress:options.onProgress,shouldStop:options.shouldStop}),engine:'race-search'};
     const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)})||tacticalProof(state,performance.now()+Math.min(10,budget/10),options.shouldStop);
     if(proof?.move){
@@ -222,11 +240,15 @@
     const guards=defensiveMoves(state).map(move=>rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(move))).filter(Boolean);
     for(const edge of guards)if(!edge.visits&&!probes.includes(edge)&&edge.child?.solved!==1)probes.push(edge);
     let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield-250,lastSample=lastYield;
-    const samples=[];
+    const samples=[],openingSamples=[];let openingFastPath=false,lastOpeningSample=lastYield;
     const sample=()=>{const choice=searchChoice(rootNode);if(choice){samples.push(choice);if(samples.length>4)samples.shift();}};
     options.onProgress?.({nodes:0,phase:'search'});
     while(!options.shouldStop?.()&&rootNode.solved===null){
       const now=performance.now(),reserve=Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5);
+      // Uncertainty keeps the original deadline; never force an opening move.
+      if(opening&&now-start>=250&&now-start<=750&&!probes.length&&!guards.some(edge=>edge.child?.solved==null&&edge.visits<8)&&openingSettled(rootNode,opening,openingSamples)){
+        deadline=now;openingFastPath=true;break;
+      }
       if(now+reserve>=deadline){
         if(maximum>budget){sample();lastSample=now;}
         if(deadline>=hardDeadline||(!unsettled(samples)&&!guards.some(edge=>edge.child?.solved==null&&edge.visits<8)))break;
@@ -249,6 +271,9 @@
       for(let i=path.length-1;i>=0;i--){value=-value;const entry=path[i];entry.edge.visits++;entry.edge.total+=value;entry.node.visits++;updateSolved(entry.node);}
       simulations++;maxDepth=Math.max(maxDepth,path.length);
       const completedAt=performance.now();
+      if(opening&&completedAt-start<=750&&completedAt-lastOpeningSample>=50){
+        lastOpeningSample=completedAt;const choice=searchChoice(rootNode);if(choice){openingSamples.push(choice);if(openingSamples.length>3)openingSamples.shift();}
+      }
       if(maximum>budget&&completedAt-lastSample>=250){lastSample=completedAt;sample();}
       if(options.onProgress&&completedAt-lastProgress>=250){lastProgress=completedAt;options.onProgress({nodes:simulations,phase:'search'});}
       if(completedAt-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
@@ -271,7 +296,7 @@
       const child=R.apply(state,edge.move),distances=R.distances(child),solved=edge.child?.solved;
       return {move:edge.move,score:solved===-1?999:solved===1?-999:(edge.visits?edge.total/edge.visits:rootNode.value)*10,bound:solved==null?'estimate':'proven',winNow:child.winner===us,reply:null,ownDistance:distances[us],opponentDistance:distances[1-us],ownDelay:distances[us]-baseline[us],opponentDelay:distances[1-us]-baseline[1-us],route:R.path(child,us),visits:edge.visits,prior:edge.prior};
     });
-    return {candidates,engine:'neural-puct',provenWin:rootNode.solved===1,depth:maxDepth,nodes:simulations,simulations,searchBudgetMs:Math.round(deadline-start+30),elapsedMs:Math.round(performance.now()-start),legalCount:rootNode.edges.length,searchedCount:rootNode.edges.filter(e=>e.visits).length,wallWidth:rootNode.edges.filter(e=>e.move.type==='wall').length,paths:baseline,...(!options.predictor?{inference:root.WallzInference.info()}: {})};
+    return {candidates,...(openingFastPath?{openingFastPath:true}:{}),engine:'neural-puct',provenWin:rootNode.solved===1,depth:maxDepth,nodes:simulations,simulations,searchBudgetMs:Math.round(deadline-start+30),elapsedMs:Math.round(performance.now()-start),legalCount:rootNode.edges.length,searchedCount:rootNode.edges.filter(e=>e.visits).length,wallWidth:rootNode.edges.filter(e=>e.move.type==='wall').length,paths:baseline,...(!options.predictor?{inference:root.WallzInference.info()}: {})};
   }
   async function analyse(state,options={}){
     const start=performance.now();

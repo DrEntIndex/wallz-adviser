@@ -20,7 +20,7 @@ async function computeCall(action,state,options={}){
   computePending.set(id,{...options,cancel});
   const timer=options.shouldStop?setInterval(cancel,25):null;
   try{
-    const response=await chrome.runtime.sendMessage({type:'WALLZ_COMPUTE',id,action,state,budgetMs:options.budgetMs,maxBudgetMs:options.maxBudgetMs});
+    const response=await chrome.runtime.sendMessage({type:'WALLZ_COMPUTE',id,action,state,budgetMs:options.budgetMs,maxBudgetMs:options.maxBudgetMs,...(options.opening?{opening:options.opening}:{})});
     if(response?.error||!response?.result)throw new Error(response?.error||'Compute unavailable');
     return response.result;
   }finally{if(timer)clearInterval(timer);computePending.delete(id);}

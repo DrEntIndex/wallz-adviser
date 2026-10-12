@@ -12,7 +12,7 @@ self.onmessage=event=>{
       let result;
       if(request.action==='init'){await WallzNeural.init();result=WallzInference.info();}
       else{
-        const options={budgetMs:request.budgetMs,maxBudgetMs:request.maxBudgetMs,shouldStop:()=>job.cancelled||(job.control&&Atomics.load(job.control,0)!==0),onProgress:progress=>postMessage({id:request.id,progress})};
+        const options={budgetMs:request.budgetMs,maxBudgetMs:request.maxBudgetMs,...(request.opening?{opening:request.opening}:{}),shouldStop:()=>job.cancelled||(job.control&&Atomics.load(job.control,0)!==0),onProgress:progress=>postMessage({id:request.id,progress})};
         result=await WallzNeural[request.action](request.state,options);
       }
       postMessage({id:request.id,result});

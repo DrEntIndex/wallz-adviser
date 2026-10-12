@@ -5,7 +5,7 @@
   const CHANNEL = 'wallz-adviser-position-v1';
   let previous = '', lastSent = 0;
   let autoplayEnabled = false, playGeneration = 0, lastPressGeneration = 0, lastPlayed = '';
-  let autoGGEnabled=false,gameSequence=0,trackedGame=null;
+  let autoGGEnabled=false,gameSequence=0,trackedGame=null,trackedOpening=null;
   const sentGG=new Set();
 
   function trackGame(room){
@@ -15,6 +15,29 @@
       trackedGame={key,id:key+':'+Date.now()+':'+(++gameSequence),count,winner};
     }else{trackedGame.count=count;trackedGame.winner=winner;}
     return trackedGame.id;
+  }
+
+  // Only an observed count-zero start can arm this; a familiar board alone cannot.
+  function trackOpening(room,gameId){
+    if(!gameId){if(trackedOpening)trackedOpening.valid=false;return;}
+    const s=room?.game,count=Array.isArray(room?.moves)?room.moves.length:null;
+    const key=s&&JSON.stringify([s.pawns?.p1?.x,s.pawns?.p1?.y,s.pawns?.p2?.x,s.pawns?.p2?.y,s.walls,s.wallsRemaining?.p1,s.wallsRemaining?.p2,s.turn,s.winner??null,s.variant||'classic']);
+    const matches=(starter,ply)=>{
+      if(!s||ply==null||ply<0||ply>4||(s.variant!=null&&s.variant!=='classic')||s.winner!=null||!Array.isArray(s.walls)||s.walls.length||s.wallsRemaining?.p1!==10||s.wallsRemaining?.p2!==10)return false;
+      const a=Math.floor((ply+(starter===0?1:0))/2),b=Math.floor((ply+(starter===1?1:0))/2);
+      return s.turn===((ply%2?1-starter:starter)===0?'p1':'p2')&&s.pawns?.p1?.x===4&&s.pawns?.p1?.y===a&&s.pawns?.p2?.x===4&&s.pawns?.p2?.y===8-b;
+    };
+    if(trackedOpening?.gameId!==gameId){
+      const starter=s?.turn==='p1'?0:s?.turn==='p2'?1:null;
+      trackedOpening={gameId,starter,ply:count,key,valid:starter!==null&&count===0&&matches(starter,0)};
+    }else if(trackedOpening.valid){
+      const previous=trackedOpening;
+      if(count===previous.ply&&key===previous.key){}
+      else if(count===previous.ply+1&&matches(previous.starter,count)){previous.ply=count;previous.key=key;}
+      else previous.valid=false;
+    }
+    if(trackedOpening.ply>=4)trackedOpening.valid=false;
+    if(trackedOpening.valid)return {starter:trackedOpening.starter,ply:trackedOpening.ply};
   }
 
   function currentAncestors(board) {
@@ -38,23 +61,25 @@
 
   function snapshot() {
     const board = document.querySelector('svg[aria-label="Wallz board"]');
-    if (!board) return { mode: 'none', reason: 'Open a practice or private game.' };
+    if (!board) {trackOpening(null,null);return { mode: 'none', reason: 'Open a practice or private game.' };}
     const ancestors = currentAncestors(board);
-    if (!ancestors) return { mode: 'unknown', reason: 'Board reader needs an update for this version of Wallz.' };
+    if (!ancestors) {trackOpening(null,null);return { mode: 'unknown', reason: 'Board reader needs an update for this version of Wallz.' };}
     const props = ancestors.map(f => f.memoizedProps).filter(p => p && typeof p === 'object');
 
     const boardProps = props.slice().reverse().find(p => p.state?.pawns && typeof p.controllable === 'boolean' && p.bottomPlayer);
 
-    if (!boardProps) return { mode: 'unknown', reason: 'Could not read the current board.' };
+    if (!boardProps) {trackOpening(null,null);return { mode: 'unknown', reason: 'Could not read the current board.' };}
 
     const s = boardProps.state;
     const online=props.find(p=>p.snapshot?.game===s&&typeof p.onSendChat==='function');
     const gameId=online?trackGame(online.snapshot):null;
+    const opening=trackOpening(online?.snapshot,gameId);
     const copy = p => ({ x: p.x, y: p.y });
 
     return {
       mode: 'any',
       ...(gameId?{gameId,chatAvailable:online.socketConnected!==false&&!online.connecting}:{}),
+      ...(opening?{opening}:{}),
       player: boardProps.bottomPlayer,
       controllable: boardProps.controllable,
       flipped: s.variant !== 'race' && boardProps.bottomPlayer === 'p1',
@@ -79,6 +104,7 @@
         window.postMessage({ channel: CHANNEL, data }, location.origin);
       }
     } catch {
+      trackOpening(null,null);
       window.postMessage({
         channel: CHANNEL,
         data: { mode: 'unknown', reason: 'Could not read this position. Refresh the page.' }
