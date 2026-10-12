@@ -96,6 +96,19 @@
     }
     return null;
   }
+
+  function forcingMoves(state,children){
+    if(!state.remaining[state.turn])return [];
+    const us=state.turn,them=1-us,base=R.distances(state),mobility=R.pawnMoves(state,them).length,ranked=[];
+    for(const entry of children){
+      if(entry.move.type!=='wall')continue;
+      const after=R.distances(entry.state),gain=after[them]-base[them]-(after[us]-base[us])-1;
+      const restricted=mobility-R.pawnMoves(entry.state,them).length;
+      if(gain>=3||(restricted>0&&state.remaining[0]+state.remaining[1]<=6))ranked.push({move:entry.move,score:Math.max(0,gain)+restricted*2});
+    }
+    return ranked.sort((a,b)=>b.score-a.score||a.move.wall-b.move.wall).slice(0,3).map(entry=>entry.move);
+  }
+
   async function expand(node,predictor){
     const state=node.state,certificate=E.certify(state,{budgetMs:12});
     if(certificate){solved(node,certificate.value,certificate.plies);return node.value;}
@@ -115,9 +128,10 @@
     const logits=safe.map(edge=>output.logits[policyIndex(state,edge.move)]),max=Math.max(...logits);
     const probabilities=logits.map(value=>Math.exp(value-max)),sum=probabilities.reduce((a,b)=>a+b,0);
     for(let i=0;i<safe.length;i++)safe[i].prior=probabilities[i]/sum;
-    node.edges=edges;node.value=output.value;return node.value;
+    node.edges=edges;node.value=output.value;node.probes=forcingMoves(state,children).map(move=>edges.find(edge=>R.moveKey(edge.move)===R.moveKey(move))).filter(edge=>edge&&edge.child?.solved!==1);return node.value;
   }
-  function select(node){
+  function select(node,forcing=false){
+    if(forcing&&node.probes?.length){while(node.probes.length){const edge=node.probes.shift();if(edge.visits===0&&edge.child?.solved!==1)return edge;}}
     const scale=Math.sqrt(Math.max(1,node.visits)),exploration=1.25+Math.log((node.visits+19653)/19652);
     let total=0,visits=0,prior=0;
     for(const edge of node.edges)if(edge.visits){total+=edge.total;visits+=edge.visits;prior+=edge.prior;}
@@ -154,6 +168,28 @@
     const promising=latest.challengerVisits>=Math.max(8,latest.visits*.2)&&latest.challengerValue>latest.value+.05;
     return close||promising;
   }
+
+  function defensiveMoves(state){
+    const us=state.turn,them=1-us,base=R.distances(state),choices=R.successors(state),walls=new Map(choices.filter(c=>c.move.type==='wall').map(c=>[c.move.wall,c])),scores=new Map();
+    if(!state.remaining[us]||!state.remaining[them])return [];
+    const before=R.pawnMoves(state,us).length;
+    for(const threat of R.successors({...state,turn:them})){
+      if(threat.move.type!=='wall')continue;
+      const after=R.distances(threat.state),hurt=after[us]-base[us]-(after[them]-base[them])-1;
+      const mobility=before-R.pawnMoves(threat.state,us).length;
+      if(hurt<2&&mobility<1)continue;
+      const wall=threat.move.wall,guards=[wall^64];
+      if(wall<64){if((wall&7)>0)guards.push(wall-1);if((wall&7)<7)guards.push(wall+1);}
+      else{if((wall&63)>7)guards.push(wall-8);if((wall&63)<56)guards.push(wall+8);}
+      for(const guard of guards){const choice=walls.get(guard);if(!choice)continue;
+        const next=R.distances(choice.state),cost=next[us]-base[us]-(next[them]-base[them])+1;
+        const score=Math.max(hurt,mobility)-Math.max(0,cost);
+        if(score>=3)scores.set(guard,Math.max(scores.get(guard)||0,score));
+      }
+    }
+    return [...scores].sort((a,b)=>b[1]-a[1]||a[0]-b[0]).slice(0,4).map(([wall])=>({type:'wall',wall}));
+  }
+
   async function search(state,options={}){
     const start=performance.now(),{normal:budget,maximum}=thinkingBudget(options),hardDeadline=start+maximum-30;
     let deadline=start+budget-30;
@@ -183,6 +219,8 @@
       const edge=rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(candidate.move));
       if(edge&&edge.visits===0&&edge.child?.solved!==1&&!probes.includes(edge))probes.push(edge);
     }
+    const guards=defensiveMoves(state).map(move=>rootNode.edges.find(edge=>R.moveKey(edge.move)===R.moveKey(move))).filter(Boolean);
+    for(const edge of guards)if(!edge.visits&&!probes.includes(edge)&&edge.child?.solved!==1)probes.push(edge);
     let simulations=0,maxDepth=0,lastYield=performance.now(),lastProgress=lastYield-250,lastSample=lastYield;
     const samples=[];
     const sample=()=>{const choice=searchChoice(rootNode);if(choice){samples.push(choice);if(samples.length>4)samples.shift();}};
@@ -191,13 +229,13 @@
       const now=performance.now(),reserve=Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5);
       if(now+reserve>=deadline){
         if(maximum>budget){sample();lastSample=now;}
-        if(deadline>=hardDeadline||!unsettled(samples))break;
+        if(deadline>=hardDeadline||(!unsettled(samples)&&!guards.some(edge=>edge.child?.solved==null&&edge.visits<8)))break;
         deadline=Math.min(hardDeadline,deadline+500);
         if(now+reserve>=deadline)break;
       }
       let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
       while(node.edges&&node.solved===null&&path.length<100){
-        const edge=node===rootNode&&probes.length?probes.shift():select(node);if(!edge)break;
+        const edge=node===rootNode&&probes.length?probes.shift():select(node,path.length<=2);if(!edge)break;
         if(!edge.child)connect(node,edge,R.apply(node.state,edge.move));
         path.push({node,edge});node=edge.child;
         if(seen.has(node.key)){cycle=true;break;}seen.add(node.key);
