@@ -39,13 +39,29 @@ test('an unsupported origin or malformed position never queues search',()=>{
   h.flush();assert.equal(h.analyses.length,0);
   assert.ok(h.responses.every(r=>r.error));
 });
-test('every request uses the strongest search regardless of old mode settings',()=>{
+test('default requests retain normal timing regardless of old budget settings',()=>{
   const h=harness();h.send(1);h.flush();h.send(2,opening,1,12);h.flush();
   assert.equal(h.analyses.length,2);
   assert.equal(h.analyses[1].options.budgetMs,3000);
   assert.deepEqual(h.responses.map(r=>r.id),[1,2]);
   assert.ok(h.responses.every(r=>r.result));
 });
+test('quick mode uses two seconds in classical and neural paths, with a four-second neural cap',async()=>{
+  const h=harness();
+  h.message({type:'WALLZ_ANALYSE',id:1,state:opening,quickMode:true});h.flush();
+  assert.equal(h.analyses[0].options.budgetMs,2000);
+  const calls=[];
+  h.context.WallzNeural={analyse:async(state,options)=>{calls.push(options);return {candidates:[]};}};
+  h.message({type:'WALLZ_ANALYSE',id:2,state:opening,quickMode:true});h.flush();await new Promise(setImmediate);
+  assert.equal(calls[0].budgetMs,2000);assert.equal(calls[0].maxBudgetMs,4000);
+  h.send(3);h.flush();await new Promise(setImmediate);
+  assert.equal(calls[1].budgetMs,3000);assert.equal(calls[1].maxBudgetMs,6000);
+  h.context.WallzCompute={analyse:async()=>{throw new Error('Worker unavailable');}};
+  h.message({type:'WALLZ_ANALYSE',id:4,state:opening,quickMode:true});h.flush();await new Promise(setImmediate);
+  assert.equal(h.analyses.at(-1).options.budgetMs,2000);
+  assert.equal(h.responses.at(-1).result.engine,'classical-fallback');
+});
+
 test('search errors respond once and do not strand the next request',()=>{
   const h=harness();h.context.WallzEngine.analyse=()=>{throw new Error('Search failed');};
   h.send(1);h.flush();h.send(2);h.flush();

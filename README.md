@@ -32,6 +32,8 @@ The highlighted square or wall is the suggested next action. The faint line show
 
 Open the gear in the bottom right to pause analysis or enable **Autoplay best move**. You join games yourself; autoplay plays suggested actions once you're in a game.
 
+**Quick mode** starts with 2 seconds of thinking and adds 0.5-second steps when the decision is unsettled, up to 4 seconds total. With quick mode off, the normal timing remains 3 seconds, extending up to 6 seconds. Autoplay, Auto GG, quick mode, and pause settings are saved locally by the extension across page refreshes and browser restarts.
+
 The counter beside the gear shows search work: **explored** while choosing a move and **prepared** while thinking ahead during the opponent's turn. It isn't a count of unique board positions or moves played.
 
 To update, download a fresh copy, replace the extension files, click **Reload** on the extensions page, and refresh Wallz.

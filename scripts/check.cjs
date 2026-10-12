@@ -10,7 +10,7 @@ for(const name of ['rules.js','engine.js','inference.js','neural.js','bridge.js'
 for(const script of [...manifest.content_scripts.flatMap(s=>s.js),manifest.background.service_worker]) {
   if(!fs.existsSync(path.join(root,'extension',script))) throw new Error('Missing manifest resource: '+script);
 }
-if(JSON.stringify(manifest.permissions)!==JSON.stringify(['offscreen']) || manifest.host_permissions?.length) throw new Error('Unexpected extension permissions');
+if(JSON.stringify(manifest.permissions)!==JSON.stringify(['offscreen','storage']) || manifest.host_permissions?.length) throw new Error('Unexpected extension permissions');
 for(const script of ['compute.js','compute-worker.js','compute-host.js','compute-host.html'])if(!fs.existsSync(path.join(root,'extension',script)))throw new Error('Missing compute resource: '+script);
 const resources={
   'vendor/ort.webgpu.worker.min.js':'916a2187a9f6db02fde93de3ac83d463e379eea97ba29152544e3c9701e3c8e7',

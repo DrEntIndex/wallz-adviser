@@ -19,9 +19,10 @@
       [hidden]{display:none!important}button:focus-visible{outline:2px solid #80f4c0;outline-offset:3px}
     </style>
     <section class="panel" aria-label="Adviser settings" hidden>
-      <label class="autoplay"><input id="autoplay" type="checkbox">Autoplay best move</label>
-      <label class="autoplay" title="Send GG once when your win is proven"><input id="autogg" type="checkbox">Auto GG</label>
-      <button class="pause">Pause</button><p class="status" role="status" aria-live="polite">Reading board…</p>
+      <label class="autoplay"><input id="autoplay" type="checkbox" disabled>Autoplay best move</label>
+      <label class="autoplay" title="Send GG once when your win is proven"><input id="autogg" type="checkbox" disabled>Auto GG</label>
+      <label class="autoplay" title="Think for 2 seconds, extending in 0.5-second steps up to 4 seconds"><input id="quickmode" type="checkbox" disabled>Quick mode</label>
+      <button class="pause" disabled>Pause</button><p class="status" role="status" aria-live="polite">Reading board…</p>
     </section>
     <div class="toolbar"><span class="counter" title="Positions explored in the current search" aria-label="0 positions explored">0 explored</span><button class="trigger" aria-label="Adviser controls" aria-expanded="false" title="Adviser controls">⚙︎</button></div>`;
   document.documentElement.append(host);
@@ -33,7 +34,24 @@
   overlay.style.cssText='position:fixed;pointer-events:none;z-index:2147483645;overflow:visible;display:none';
   document.documentElement.append(overlay);
   let captured=null,position=null,result=null,lastSignature='',requestId=0,timer=null,enabled=true;
-  let observedBoard=null;
+  let observedBoard=null,settingsReady=false;
+  const settingIds=['autoplay','autogg','quickmode'];
+  function saveSettings(){
+    const wallzSettings={enabled};
+    for(const id of settingIds)wallzSettings[id]=$('#'+id).checked;
+    chrome.storage?.local?.set({wallzSettings}).catch(()=>status('Could not save settings.'));
+  }
+  async function restoreSettings(){
+    try{
+      const saved=(await chrome.storage?.local?.get('wallzSettings'))?.wallzSettings;
+      if(typeof saved?.enabled==='boolean')enabled=saved.enabled;
+      for(const id of settingIds)if(typeof saved?.[id]==='boolean')$('#'+id).checked=saved[id];
+    }catch{}
+    settingsReady=true;
+    for(const id of settingIds)$('#'+id).disabled=false;
+    $('.pause').disabled=false;$('.pause').textContent=enabled?'Pause':'Resume';
+    syncAutoplay();syncAutoGG();analyse();
+  }
   window.addEventListener('pagehide',()=>{cancelAutoplay();stopSearch();});
   let lastAutoPosition='',playId=0,pendingPlay=null,playTimer=null,retryTimer=null,playFailures=0;
   let ggId=0,pendingGG=null;
@@ -129,6 +147,7 @@
   function clearAdvice(){result=null;overlay.replaceChildren();overlay.style.display='none';}
   function stopSearch(){return chrome.runtime.sendMessage({type:'WALLZ_STOP',id:requestId}).catch(()=>{});}
   function analyse() {
+    if(!settingsReady)return;
     clearTimeout(timer);clearAdvice();
     const id=++requestId;searchCounter();
     if(!enabled){stopSearch();status('Paused');return;}
@@ -142,7 +161,7 @@
     timer=setTimeout(async()=>{
       try {
         if(id!==requestId||!enabled)return;
-        const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state});
+        const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state,quickMode:$('#quickmode').checked});
         if(id!==requestId || !enabled)return;
         if(response?.error || !response?.result)throw new Error(response?.error || 'No analysis returned');
         result=response.result;searchCounter(result.nodes, 'search',result.inference);status('');draw();autoGG();autoplay();
@@ -184,9 +203,10 @@
   function setMenu(open){$('.panel').hidden=!open;$('.trigger').setAttribute('aria-expanded',String(open));}
   function toggleMenu(){setMenu($('.panel').hidden);}
   $('.trigger').addEventListener('click',toggleMenu);
-  $('.pause').addEventListener('click',()=>{enabled=!enabled;$('.pause').textContent=enabled?'Pause':'Resume';cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();syncAutoGG();analyse();});
-  $('#autoplay').addEventListener('change',()=>{cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();if($('#autoplay').checked)autoplay();else status(enabled?'':'Paused');});
-  $('#autogg').addEventListener('change',()=>{syncAutoGG();if($('#autogg').checked)autoGG();});
+  $('.pause').addEventListener('click',()=>{enabled=!enabled;saveSettings();$('.pause').textContent=enabled?'Pause':'Resume';cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();syncAutoGG();analyse();});
+  $('#autoplay').addEventListener('change',()=>{saveSettings();cancelAutoplay();playFailures=0;lastAutoPosition='';syncAutoplay();if($('#autoplay').checked)autoplay();else status(enabled?'':'Paused');});
+  $('#autogg').addEventListener('change',()=>{saveSettings();syncAutoGG();if($('#autogg').checked)autoGG();});
+  $('#quickmode').addEventListener('change',()=>{saveSettings();cancelAutoplay();playFailures=0;lastAutoPosition='';stopSearch();analyse();});
   chrome.runtime.onMessage.addListener(message=>{
     if(message?.type==='WALLZ_TOGGLE')toggleMenu();
     if(message?.type==='WALLZ_PROGRESS'&&message.id===requestId&&enabled&&position?.winner==null)searchCounter(message.nodes,message.phase);
@@ -194,4 +214,5 @@
   document.addEventListener('click',event=>{if(!event.composedPath().includes(host))setMenu(false);});
   document.addEventListener('keydown',event=>{if(event.key==='Escape' && !$('.panel').hidden){setMenu(false);$('.trigger').focus();}});
   window.addEventListener('scroll',align,{passive:true});window.addEventListener('resize',align,{passive:true});
+  restoreSettings();
 })();

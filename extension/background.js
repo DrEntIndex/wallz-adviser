@@ -40,6 +40,7 @@ chrome.runtime.onMessage.addListener((request,sender,respond)=>{
       if(state.winner==null&&state.variant==='classic'){preparing.set(tabId,{tabId,id:request.id,state,generation});queuePreparation();}
       respond({id:request.id,preparing:true});return false;
     }
+    const budgetMs=request.quickMode===true?2000:3000,maxBudgetMs=request.quickMode===true?4000:6000;
     const job={id:request.id,respond,tabId};foreground.add(job);globalThis.WallzCompute?.cancelStale?.();
     job.timer=setTimeout(()=>{
       waiting.delete(tabId);
@@ -47,15 +48,15 @@ chrome.runtime.onMessage.addListener((request,sender,respond)=>{
         searches=searches.catch(()=>{}).then(async()=>{
           if(generations.get(tabId)!==generation){respond({id:request.id,error:'Superseded by a newer position'});return;}
           try{
-            const result=await compute().analyse(state,{budgetMs:3000,maxBudgetMs:6000,shouldStop:()=>generations.get(tabId)!==generation,onProgress:progress(tabId,request.id,generation)});
+            const result=await compute().analyse(state,{budgetMs,maxBudgetMs,shouldStop:()=>generations.get(tabId)!==generation,onProgress:progress(tabId,request.id,generation)});
             respond(generations.get(tabId)===generation?{id:request.id,result}:{id:request.id,error:'Superseded by a newer position'});
           }catch(error){
-            if(globalThis.WallzCompute&&generations.get(tabId)===generation){try{respond({id:request.id,result:{...WallzEngine.analyse(state,{budgetMs:3000,onProgress:progress(tabId,request.id,generation)}),engine:'classical-fallback',modelError:error.message}});}catch(fallback){respond({id:request.id,error:fallback.message});}}
+            if(globalThis.WallzCompute&&generations.get(tabId)===generation){try{respond({id:request.id,result:{...WallzEngine.analyse(state,{budgetMs,onProgress:progress(tabId,request.id,generation)}),engine:'classical-fallback',modelError:error.message}});}catch(fallback){respond({id:request.id,error:fallback.message});}}
             else respond({id:request.id,error:error.message});
           }
         }).finally(()=>{foreground.delete(job);queuePreparation();});
       }else{
-        try{respond({id:request.id,result:WallzEngine.analyse(state,{budgetMs:3000,onProgress:progress(tabId,request.id,generation)})});}
+        try{respond({id:request.id,result:WallzEngine.analyse(state,{budgetMs,onProgress:progress(tabId,request.id,generation)})});}
         catch(error){respond({id:request.id,error:error.message});}
         finally{foreground.delete(job);queuePreparation();}
       }

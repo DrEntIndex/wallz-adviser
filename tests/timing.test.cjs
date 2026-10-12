@@ -39,6 +39,17 @@ test('cancellation still interrupts an extended search',async()=>{
   assert.ok(result.elapsedMs>=3300&&result.elapsedMs<3400);
 });
 
+test('quick mode settles at two seconds and extends in half-second steps up to four',async()=>{
+  const stable=harness(true),settled=await stable.api.analyse(stable.state,{budgetMs:2000,maxBudgetMs:4000,predictor:stable.predictor});
+  assert.equal(settled.searchBudgetMs,2000);assert.ok(settled.elapsedMs>=1900&&settled.elapsedMs<=2000);
+  const h=harness(),extended=await h.api.analyse(h.state,{budgetMs:2000,maxBudgetMs:4000,predictor:h.predictor});
+  assert.equal(extended.searchBudgetMs,4000);assert.ok(extended.elapsedMs>=3900&&extended.elapsedMs<=4000);
+  for(const [stop,budget] of [[2200,2500],[2700,3000],[3200,3500],[3700,4000]]){
+    const h=harness(),result=await h.api.analyse(h.state,{budgetMs:2000,maxBudgetMs:4000,predictor:h.predictor,shouldStop:()=>h.time()>=stop});
+    assert.equal(result.searchBudgetMs,budget);assert.ok(result.elapsedMs>=stop&&result.elapsedMs<stop+100);
+  }
+});
+
 test('fixed-budget callers retain their requested search limit',async()=>{
   const h=harness(),result=await h.api.analyse(h.state,{budgetMs:1000,predictor:h.predictor});
   assert.equal(result.searchBudgetMs,1000);assert.ok(result.elapsedMs<=1000);
