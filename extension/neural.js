@@ -191,7 +191,7 @@
   }
 
   function openingMove(state,opening){
-    if(!opening||![0,1].includes(opening.starter)||!Number.isInteger(opening.ply)||opening.ply<0||opening.ply>3||state.variant!=='classic'||state.winner!=null||state.walls.length||state.remaining[0]!==10||state.remaining[1]!==10)return null;
+    if(!opening||![0,1].includes(opening.starter)||!Number.isInteger(opening.ply)||opening.ply<0||opening.ply>5||state.variant!=='classic'||state.winner!=null||state.walls.length||state.remaining[0]!==10||state.remaining[1]!==10)return null;
     const {starter,ply}=opening,a=Math.floor((ply+(starter===0?1:0))/2),b=Math.floor((ply+(starter===1?1:0))/2);
     if(state.turn!==(ply%2?1-starter:starter)||state.pawns[0]!==4+a*9||state.pawns[1]!==76-b*9)return null;
     const to=state.pawns[state.turn]+(state.turn===0?9:-9);

@@ -34,7 +34,7 @@ Open the gear in the bottom right to pause analysis or enable **Autoplay best mo
 
 **Quick mode** starts with 2 seconds of thinking and adds 0.5-second steps when the decision is unsettled, up to 4 seconds total. With quick mode off, the normal timing remains 3 seconds, extending up to 6 seconds. Autoplay, Auto GG, quick mode, and pause settings are saved locally by the extension across page refreshes and browser restarts.
 
-When the adviser observes the game from the start and both players only move straight forward, it can finish thinking early during each player's first two moves if its search settles clearly on forward. Any wall, sideways or backward move, uncertain opening history, or unsettled decision uses the usual thinking time. After the opening ends or deviates, the rest of that game uses the usual timing.
+When the adviser observes the game from the start and both players only move straight forward, it can finish thinking early during each player's first three moves (six total turns) if its search settles clearly on forward. Any wall, sideways or backward move, uncertain opening history, or unsettled decision uses the usual thinking time. After the opening ends or deviates, the rest of that game uses the usual timing.
 
 The counter beside the gear shows search work: **explored** while choosing a move and **prepared** while thinking ahead during the opponent's turn. It isn't a count of unique board positions or moves played.
 

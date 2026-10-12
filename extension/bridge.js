@@ -23,7 +23,7 @@
     const s=room?.game,count=Array.isArray(room?.moves)?room.moves.length:null;
     const key=s&&JSON.stringify([s.pawns?.p1?.x,s.pawns?.p1?.y,s.pawns?.p2?.x,s.pawns?.p2?.y,s.walls,s.wallsRemaining?.p1,s.wallsRemaining?.p2,s.turn,s.winner??null,s.variant||'classic']);
     const matches=(starter,ply)=>{
-      if(!s||ply==null||ply<0||ply>4||(s.variant!=null&&s.variant!=='classic')||s.winner!=null||!Array.isArray(s.walls)||s.walls.length||s.wallsRemaining?.p1!==10||s.wallsRemaining?.p2!==10)return false;
+      if(!s||ply==null||ply<0||ply>6||(s.variant!=null&&s.variant!=='classic')||s.winner!=null||!Array.isArray(s.walls)||s.walls.length||s.wallsRemaining?.p1!==10||s.wallsRemaining?.p2!==10)return false;
       const a=Math.floor((ply+(starter===0?1:0))/2),b=Math.floor((ply+(starter===1?1:0))/2);
       return s.turn===((ply%2?1-starter:starter)===0?'p1':'p2')&&s.pawns?.p1?.x===4&&s.pawns?.p1?.y===a&&s.pawns?.p2?.x===4&&s.pawns?.p2?.y===8-b;
     };
@@ -36,7 +36,7 @@
       else if(count===previous.ply+1&&matches(previous.starter,count)){previous.ply=count;previous.key=key;}
       else previous.valid=false;
     }
-    if(trackedOpening.ply>=4)trackedOpening.valid=false;
+    if(trackedOpening.ply>=6)trackedOpening.valid=false;
     if(trackedOpening.valid)return {starter:trackedOpening.starter,ply:trackedOpening.ply};
   }
 

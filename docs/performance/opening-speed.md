@@ -1,6 +1,8 @@
 # Guarded opening speedup
 
-The adviser now allows its search to finish early during the first two pawn moves per side, only after verifying an uninterrupted straight-forward opening from the actual start of the game. It still searches pawn moves and walls; it does not force forward or label opening estimates as proven wins.
+The adviser now allows its search to finish early during the first three pawn moves per side (six total turns), only after verifying an uninterrupted straight-forward opening from the actual start of the game. It still searches pawn moves and walls; it does not force forward or label opening estimates as proven wins.
+
+The user-requested three-move follow-up is recorded in [opening-match-validation.md](opening-match-validation.md). It includes real old-versus-current games, the additional third moves, and fourth-move cutoff checks. The timing results below describe the original two-move implementation.
 
 ## Final implementation and measurements
 
@@ -8,7 +10,7 @@ On the same eight opening cases, the mean of two per-run median search times dec
 
 A separate four-thread CPU check returned a median of **325.7 ms**, again with six early exits, two full-budget searches, and all eight moves matching the reference. It is additional evidence, not pooled into the one-thread result. Startup was timed separately at about 319 ms in the final one-thread runs. These are warm-model search timings, not total first-turn extension response times.
 
-Any wall, sideways or backward move, missing/skipped observation, unreadable board, or uncertain game identity disables the shortcut for the remainder of that game. A new verified game can enable it again. The shortcut also ends after four plies. Joining or reloading after the start, and practice games without online move history, keep ordinary thinking time.
+Any wall, sideways or backward move, missing/skipped observation, unreadable board, or uncertain game identity disables the shortcut for the remainder of that game. A new verified game can enable it again. The shortcut now ends after six plies. Joining or reloading after the start, and practice games without online move history, keep ordinary thinking time.
 
 Early exit requires three recent samples and the current root choice to agree on forward, finite confidence values, the existing settled-decision check, at least sixteen forward visits, a strong learned prior, and at least four times every alternative's visits. A sufficiently explored alternative with better value rejects early exit. Root probes and unresolved defensive guards must be explored first. The exit window is 250–750 ms; if its conditions never pass, the original normal/quick budget and extension logic remain intact. Inference or startup failures retain the original remaining fallback budget.
 
@@ -40,11 +42,11 @@ For example, starting from `[4,76]`, the legal pawn sequence `13,67,4,76` is for
 
 ## Implementation constraints
 
-Use a much shorter search only during the first two moves by each side, after verifying the uninterrupted forward opening from the actual start of this game. Continue generating legal moves and using the existing neural engine; any wall, sideways or backward move, unexpected position, missing or skipped observation, third pawn move, race variant, or pawn contact must use the ordinary normal/quick timing. Once the sequence deviates, disable the shortcut for the remainder of that game, even if the pawns later return to familiar squares. A new game resets eligibility.
+Use a much shorter search only during the first three moves by each side, after verifying the uninterrupted forward opening from the actual start of this game. Continue generating legal moves and using the existing neural engine; any wall, sideways or backward move, unexpected position, missing or skipped observation, fourth pawn move, race variant, or pawn contact must use the ordinary normal/quick timing. Once the sequence deviates, disable the shortcut for the remainder of that game, even if the pawns later return to familiar squares. A new game resets eligibility.
 
 The implementation shortens search only after validating the exact opening positions and history. An unsettled decision keeps the existing full budget. In particular, the second move by the starter has a forward model prior of about 0.44 with competitive wall alternatives; matching the measured choices is not a mathematical proof that forward is best.
 
-Keep result fields, legal-move checks, cancellation, stale-position protection, opponent-turn preparation, and proof semantics intact. Opening choices must remain estimates rather than being labeled proven wins. Explicitly test deviations by either color, backward loops returning to the start, mid-game reloads, new-game resets, early walls at every opening turn, quick mode, and the third move boundary. Compare ordinary full-search results on those deviations before keeping a change.
+Keep result fields, legal-move checks, cancellation, stale-position protection, opponent-turn preparation, and proof semantics intact. Opening choices must remain estimates rather than being labeled proven wins. Explicitly test deviations by either color, backward loops returning to the start, mid-game reloads, new-game resets, early walls at every opening turn, quick mode, and the fourth move boundary. Compare ordinary full-search results on those deviations before keeping a change.
 
 The run used two serial implementation candidates and one verification sub-agent. No dependencies or paid judging services were added. Delegated model billing is unavailable from the host, so the dollar total is unverified. The verified implementation is retained locally; no PR or push was requested.
 

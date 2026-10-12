@@ -45,11 +45,11 @@ function neuralHarness() {
   return context.WallzNeural.openingTest;
 }
 
-function searchHarness({ stable = true, inferenceDelay = 10, failStartup = false } = {}) {
+function searchHarness({ stable = true, inferenceDelay = 10, failStartup = false, starter = 0, ply = 0 } = {}) {
   let clock = 0;
   const fallbacks = [];
-  const state = { ...R.normalize(openingRoom().game), id: 'root' };
-  const forward = { type: 'pawn', to: 13 };
+  const state = { ...R.normalize(openingRoom(starter, ply).game), id: 'root' };
+  const forward = { type: 'pawn', to: state.pawns[state.turn] + (state.turn === 0 ? 9 : -9) };
   const apply = (s, move) => ({ ...s, id: s.id + '/' + R.moveKey(move), turn: 1 - s.turn });
   const rules = {
     stateKey: s => s.id, moveKey: R.moveKey, apply, distances: () => [8, 8], path: () => [], goal: () => 8,
@@ -74,6 +74,24 @@ function searchHarness({ stable = true, inferenceDelay = 10, failStartup = false
   };
   return { api: context.WallzNeural, state, predictor, fallbacks, time: () => clock };
 }
+
+test('third moves can qualify but every fourth move keeps the complete normal or quick budget', async () => {
+  for (const starter of [0, 1]) for (const budgetMs of [2000, 3000]) {
+    for (const ply of [4, 5]) {
+      const h = searchHarness({ starter, ply });
+      const result = await h.api.analyse(h.state, { budgetMs, maxBudgetMs: budgetMs, predictor: h.predictor, opening: { starter, ply } });
+      assert.equal(result.openingFastPath, true, `starter=${starter} ply=${ply}`);
+      assert.ok(result.elapsedMs < 750);
+    }
+    for (const ply of [6, 7]) {
+      const h = searchHarness({ starter, ply });
+      const result = await h.api.analyse(h.state, { budgetMs, maxBudgetMs: budgetMs, predictor: h.predictor, opening: { starter, ply } });
+      assert.equal(result.openingFastPath, undefined, `starter=${starter} ply=${ply}`);
+      assert.equal(result.searchBudgetMs, budgetMs);
+      assert.ok(result.elapsedMs >= budgetMs - 50);
+    }
+  }
+});
 
 test('overlay forwards observed opening tokens and leaves untagged requests untagged', async () => {
   const code = source('overlay.js');
@@ -116,7 +134,7 @@ test('untagged, altered and uncertain openings retain their normal or quick sear
   for (const budgetMs of [2000, 3000]) for (const scenario of ['untagged', 'malformed', 'uncertain', 'deviation', 'slow']) {
     const h = searchHarness({ stable: scenario !== 'uncertain', inferenceDelay: scenario === 'slow' ? 200 : 10 });
     if (scenario === 'deviation') h.state.pawns[0] = 3;
-    const opening = scenario === 'untagged' ? undefined : scenario === 'malformed' ? { starter: 0, ply: 4 } : { starter: 0, ply: 0 };
+    const opening = scenario === 'untagged' ? undefined : scenario === 'malformed' ? { starter: 0, ply: 6 } : { starter: 0, ply: 0 };
     const result = await h.api.analyse(h.state, { budgetMs, maxBudgetMs: budgetMs, predictor: h.predictor, opening });
     assert.equal(result.engine, 'neural-puct', scenario);
     assert.equal(result.openingFastPath, undefined, scenario);
@@ -158,10 +176,10 @@ test('real game tracking re-arms count-zero resets and rejects reset observation
   const bridge = bridgeHarness();
   bridge.show(openingRoom(0, 0)); const first = bridge.snapshot();
   assert.deepEqual(plain(first.opening), { starter: 0, ply: 0 });
-  for (let ply = 1; ply <= 4; ply++) {
+  for (let ply = 1; ply <= 6; ply++) {
     bridge.show(openingRoom(0, ply)); const next = bridge.snapshot();
     assert.equal(next.gameId, first.gameId);
-    assert.deepEqual(plain(next.opening), ply < 4 ? { starter: 0, ply } : undefined);
+    assert.deepEqual(plain(next.opening), ply < 6 ? { starter: 0, ply } : undefined);
   }
   bridge.show(openingRoom(1, 0)); const reset = bridge.snapshot();
   assert.notEqual(reset.gameId, first.gameId);
@@ -215,18 +233,18 @@ test('an unreadable published board disables the same game until a new identity 
   bridge.show(openingRoom(0, 0)); assert.equal(bridge.snapshot().opening, undefined);
 });
 
-test('both starter colors receive tokens only through their first two forward moves', () => {
+test('both starter colors receive tokens only through their first three forward moves', () => {
   for (const starter of [0, 1]) {
     const bridge = bridgeHarness();
-    observeThrough(bridge, starter, 3);
-    assert.equal(bridge.trackOpening(openingRoom(starter, 4), 'game'), undefined);
+    observeThrough(bridge, starter, 5);
+    assert.equal(bridge.trackOpening(openingRoom(starter, 6), 'game'), undefined);
     assert.equal(bridge.trackOpening(openingRoom(starter, 0), 'game'), undefined);
   }
 });
 
 test('every legal early wall immediately disables opening tracking for the entire game', () => {
   let checked = 0;
-  for (const starter of [0, 1]) for (let ply = 0; ply < 4; ply++) {
+  for (const starter of [0, 1]) for (let ply = 0; ply < 6; ply++) {
     const raw = openingRoom(starter, ply), state = R.normalize(raw.game);
     for (let wall = 0; wall < 128; wall++) {
       const move = { type: 'wall', wall };
@@ -241,11 +259,11 @@ test('every legal early wall immediately disables opening tracking for the entir
       checked++;
     }
   }
-  assert.equal(checked, 1024);
+  assert.equal(checked, 1536);
 });
 
 test('sideways, backwards and return-to-start histories cannot regain opening eligibility', () => {
-  for (const starter of [0, 1]) for (let ply = 0; ply < 4; ply++) {
+  for (const starter of [0, 1]) for (let ply = 0; ply < 6; ply++) {
     const before = openingRoom(starter, ply), state = R.normalize(before.game);
     const forward = state.pawns[state.turn] + (state.turn === 0 ? 9 : -9);
     for (const move of R.pawnMoves(state).filter(move => move.to !== forward)) {
@@ -261,7 +279,7 @@ test('sideways, backwards and return-to-start histories cannot regain opening el
 });
 
 test('unchanged duplicate snapshots are accepted while same-count position changes latch disabled', () => {
-  for (const starter of [0, 1]) for (let ply = 0; ply < 4; ply++) {
+  for (const starter of [0, 1]) for (let ply = 0; ply < 6; ply++) {
     const bridge = bridgeHarness(); observeThrough(bridge, starter, ply);
     assert.deepEqual(plain(bridge.trackOpening(openingRoom(starter, ply), 'game')), { starter, ply });
     const changed = openingRoom(starter, ply); changed.game.turn = changed.game.turn === 'p1' ? 'p2' : 'p1';
@@ -282,7 +300,7 @@ test('skipped, missing, malformed and decreasing move counts disable tracking', 
 });
 
 test('joining a game after its initial snapshot never enables an opening token', () => {
-  for (let ply = 1; ply < 5; ply++) {
+  for (let ply = 1; ply < 7; ply++) {
     const bridge = bridgeHarness();
     assert.equal(bridge.trackOpening(openingRoom(0, ply), 'game'), undefined);
     assert.equal(bridge.trackOpening(openingRoom(0, 0), 'game'), undefined);
@@ -328,7 +346,7 @@ test('published snapshots attach opening tokens only for observed online opening
 
 test('neural opening eligibility validates exact state and token for both starter colors', () => {
   const { openingMove } = neuralHarness();
-  for (const starter of [0, 1]) for (let ply = 0; ply < 4; ply++) {
+  for (const starter of [0, 1]) for (let ply = 0; ply < 6; ply++) {
     const state = R.normalize(openingRoom(starter, ply).game), token = { starter, ply };
     const expected = { type: 'pawn', to: state.pawns[state.turn] + (state.turn === 0 ? 9 : -9) };
     assert.deepEqual(plain(openingMove(state, token)), expected);
@@ -350,7 +368,7 @@ test('untagged, malformed and expired opening tokens never qualify for shortened
   const { openingMove } = neuralHarness(), state = R.normalize(openingRoom().game);
   for (const token of [undefined, null, {}, 0, [], { starter: -1, ply: 0 }, { starter: 2, ply: 0 },
     { starter: '0', ply: 0 }, { starter: 0, ply: '0' }, { starter: 0, ply: -1 },
-    { starter: 0, ply: 4 }, { starter: 0, ply: 0.5 }, { starter: 0, ply: NaN }, { starter: false, ply: 0 }]) {
+    { starter: 0, ply: 6 }, { starter: 0, ply: 0.5 }, { starter: 0, ply: NaN }, { starter: false, ply: 0 }]) {
     assert.equal(openingMove(state, token), null);
   }
 });
