@@ -1,0 +1,127 @@
+{
+  "status": "complete",
+  "checkedAt": "2026-10-13T02:10:24.167Z",
+  "description": "Four capped reply-first preparation jobs with a uniform fixture predictor and frozen clock. GC measurements cover this Node JS process and rules/evaluation caches; bundled model/runtime/GPU allocations are excluded. Difference is not attributable solely to job queues.",
+  "samples": [
+    {
+      "jobs": 0,
+      "memory": {
+        "heapMiB": 3.878662109375,
+        "arrayBuffersMiB": 4.576056480407715,
+        "rssMiB": 45.0859375
+      }
+    },
+    {
+      "jobs": [
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        }
+      ],
+      "caches": {
+        "prepared": 8192,
+        "search": 0
+      },
+      "memory": {
+        "heapMiB": 14.856658935546875,
+        "arrayBuffersMiB": 42.173081398010254,
+        "rssMiB": 219.40234375
+      }
+    },
+    {
+      "jobs": [
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        },
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        }
+      ],
+      "caches": {
+        "prepared": 8192,
+        "search": 0
+      },
+      "memory": {
+        "heapMiB": 15.060768127441406,
+        "arrayBuffersMiB": 63.118008613586426,
+        "rssMiB": 259.2578125
+      }
+    },
+    {
+      "jobs": [
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        },
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        },
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        }
+      ],
+      "caches": {
+        "prepared": 8192,
+        "search": 0
+      },
+      "memory": {
+        "heapMiB": 15.177352905273438,
+        "arrayBuffersMiB": 56.22950553894043,
+        "rssMiB": 254.625
+      }
+    },
+    {
+      "jobs": [
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        },
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        },
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        },
+        {
+          "visited": 8192,
+          "seen": 0,
+          "queued": 0,
+          "current": false
+        }
+      ],
+      "caches": {
+        "prepared": 8192,
+        "search": 0
+      },
+      "memory": {
+        "heapMiB": 15.174842834472656,
+        "arrayBuffersMiB": 45.92397117614746,
+        "rssMiB": 244.11328125
+      }
+    }
+  ]
+}

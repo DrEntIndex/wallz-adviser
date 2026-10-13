@@ -188,3 +188,20 @@ test('cancelled preparation and other rulesets do not start model evaluation',as
     await N.prepare({...start(),remaining:[0,0]});assert.equal(calls,0);
   }finally{N.clear();globalThis.WallzInference=inference;}
 });
+
+test('completed preparation releases its frontier without restarting or losing cached evaluations',async()=>{
+  const fs=require('node:fs'),vm=require('node:vm'),E=require('../extension/engine.js');
+  let calls=0;const context={WallzRules:R,WallzEngine:E,performance:{now:()=>0},setTimeout,clearTimeout,Float32Array,
+    WallzInference:{init:async()=>{},evaluate:async()=>{calls++;return {logits:new Float32Array(136),value:0};}}};
+  let source=fs.readFileSync(require.resolve('../extension/neural.js'),'utf8');
+  // Lower the visit cap in the fixture so the same real completion branch runs
+  // without thousands of expensive rule/model preparations in the test suite.
+  source=source.replaceAll('job.visited<8192','job.visited<12').replaceAll('job.visited>=8192','job.visited>=12');
+  source=source.replace('root.WallzNeural=api;','api.job=()=>[...preparations.values()][0];api.cached=()=>preparedEvaluations.size;root.WallzNeural=api;');
+  vm.runInNewContext(source,context);const neural=context.WallzNeural;
+  const completed=await neural.prepare(start(),{budgetMs:1000}),job=neural.job(),cache=neural.cached(),before=calls;
+  assert.equal(completed.done,true);assert.equal(completed.visited,12);assert.ok(cache>0);
+  assert.equal(job.queue.length,0);assert.equal(job.seen.size,0);assert.equal(job.current,null);
+  const again=await neural.prepare(start(),{budgetMs:1000});
+  assert.equal(again.done,true);assert.equal(again.visited,12);assert.equal(calls,before);assert.equal(neural.cached(),cache);
+});

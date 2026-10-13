@@ -384,7 +384,10 @@
       const now=performance.now();
       if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:job.visited,phase:'prepare'});}
     }
-    return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done:job.visited>=8192||(!job.current&&!job.queue.length),elapsedMs:Math.round(performance.now()-start)};
+    const done=job.visited>=8192||(!job.current&&!job.queue.length);
+    // Completed jobs cannot resume; retain their counters and cached outputs.
+    if(done){job.queue.length=0;job.seen.clear();job.current=null;}
+    return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done,elapsedMs:Math.round(performance.now()-start)};
   }
   const api={analyse,prepare,encode,policyIndex,init,clear:()=>{evaluations.clear();positions.clear();preparedEvaluations.clear();preparations.clear();}};
   root.WallzNeural=api;if(typeof module!=='undefined')module.exports=api;
