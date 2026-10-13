@@ -165,6 +165,13 @@ GPU backend. Tree reuse and opponent-time search are established techniques
 ([AlphaGo paper, Methods](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf));
 this makes pondering a reasonable experiment rather than proof it wins here.
 
+The retained implementation at `ca87945` also completed four quick-budget
+verification games: 2 wins, 2 losses, 244 moves. The final completion-cleanup
+source at `f72165f` played four more: 2 wins, 1 loss, 1 unfinished by sixfold
+repetition, 192 moves. Both reported zero illegal moves, model failures, input
+changes and timing failures. These small checks validate runtime behavior rather
+than establishing a strength gain; the unfinished game is not a draw or win.
+
 All **114 Node tests**, syntax/manifest/permission/runtime integrity checks, and
 browser fixtures for reuse tooltip/accessibility, stale advice, pause, opponent
 preparation and own-turn transitions passed. The shipped extension retains the
