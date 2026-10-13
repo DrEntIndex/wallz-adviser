@@ -36,13 +36,13 @@ Open the gear in the bottom right to pause analysis or enable **Autoplay best mo
 
 When the adviser observes the game from the start and both players only move straight forward, it can finish thinking early during each player's first three moves (six total turns) if its search settles clearly on forward. Any wall, sideways or backward move, uncertain opening history, or unsettled decision uses the usual thinking time. After the opening ends or deviates, the rest of that game uses the usual timing.
 
-The counter beside the gear shows search work: **explored** while choosing a move and **prepared** while thinking ahead during the opponent's turn. It isn't a count of unique board positions or moves played.
+The counter beside the gear shows search work: **explored** while choosing a move and **prepared** while thinking ahead during the opponent's turn. It isn't a count of unique board positions or moves played. After a neural search, hover over **explored** to see how many prepared evaluations it reused and how many new model evaluations it needed.
 
 To update, download a fresh copy, replace the extension files, click **Reload** on the extensions page, and refresh Wallz.
 
 ## How it works
 
-The extension reads the current board, checks legal moves and walls, and looks ahead at possible replies. A pretrained neural model helps evaluate positions and guide the search. It also prepares calculations during the opponent's turn and reuses them when possible.
+The extension reads the current board, checks legal moves and walls, and looks ahead at possible replies. A pretrained neural model helps evaluate positions and guide the search. During the opponent's turn it caches model evaluations for possible replies and likely continuations. When your turn begins, matching evaluations are reused within the normal thinking budget. See the [preparation audit](docs/performance/preparation-reuse.md) for the runtime path, measurements, and limits.
 
 The model is bundled with the extension. Analysis runs locally, without sending positions to an analysis server. There is no extension telemetry.
 

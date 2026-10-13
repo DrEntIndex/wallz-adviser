@@ -100,13 +100,14 @@
   }
 
   const counterFormat=new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1});
-  function searchCounter(nodes=0,phase='search',inference=null) {
+  function searchCounter(nodes=0,phase='search',inference=null,evaluationStats=null) {
     nodes=Number.isFinite(nodes)?Math.max(0,Math.floor(nodes)):0;
     const label=phase==='prepare'?'prepared':'explored',counter=$('.counter');
     counter.textContent=counterFormat.format(nodes)+' '+label;
     const description=phase==='prepare'?'Positions visited while preparing opponent replies':'Search lines explored this turn';
-    counter.title=description+(inference?' · '+(inference.backend==='webgpu'?'GPU':inference.threads+' CPU threads'):'');
-    counter.setAttribute('aria-label',nodes+' '+description.toLowerCase());
+    const reuse=evaluationStats?' · '+evaluationStats.preparedHits+' prepared evaluations reused · '+evaluationStats.fresh+' new model evaluations':'';
+    counter.title=description+reuse+(inference?' · '+(inference.backend==='webgpu'?'GPU':inference.threads+' CPU threads'):'');
+    counter.setAttribute('aria-label',nodes+' '+description.toLowerCase()+reuse);
   }
   function status(message) {
     $('.status').textContent=message;$('.status').hidden=!message;
@@ -164,7 +165,7 @@
         const response=await chrome.runtime.sendMessage({type:'WALLZ_ANALYSE',id,state:captured.state,quickMode:$('#quickmode').checked,...(captured.opening?{opening:captured.opening}:{})});
         if(id!==requestId || !enabled)return;
         if(response?.error || !response?.result)throw new Error(response?.error || 'No analysis returned');
-        result=response.result;searchCounter(result.nodes, 'search',result.inference);status('');draw();autoGG();autoplay();
+        result=response.result;searchCounter(result.nodes, 'search',result.inference,result.evaluationStats);status('');draw();autoGG();autoplay();
       } catch(error) {
         if(id!==requestId)return;
         status('Analysis unavailable. Refresh Wallz if you reloaded the extension.');

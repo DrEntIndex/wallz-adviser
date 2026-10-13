@@ -124,6 +124,46 @@ test('preparation covers opponent replies and continues beyond two plies',async(
   }finally{N.clear();globalThis.WallzInference=inference;}
 });
 
+test('alternating opponent positions resume their own preparation progress',async()=>{
+  N.clear();const inference=globalThis.WallzInference;let calls=0;
+  globalThis.WallzInference={init:async()=>{},evaluate:async()=>{calls++;return {logits:new Float32Array(136),value:0};}};
+  try{
+    const a=start(),b={...start(),pawns:[13,67]},progress=[];
+    const first=await N.prepare(a,{budgetMs:1000,shouldStop:()=>calls>=8});
+    await N.prepare(b,{budgetMs:1000,shouldStop:()=>calls>=12});
+    const next=await N.prepare(a,{budgetMs:1000,shouldStop:()=>calls>=14,onProgress:update=>progress.push(update.nodes)});
+    assert.equal(progress[0],first.visited,'returning to a tab must resume rather than restart its preparation counter and queue');
+    assert.ok(next.visited>first.visited);
+  }finally{N.clear();globalThis.WallzInference=inference;}
+});
+
+test('short preparation reaches likely continuations before sweeping every opponent wall',async()=>{
+  N.clear();const inference=globalThis.WallzInference,inputs=[];let calls=0;
+  globalThis.WallzInference={init:async()=>{},evaluate:async input=>{calls++;inputs.push(Array.from(input));return {logits:Float32Array.from({length:136},(_,i)=>i===0?12:0),value:0};}};
+  try{
+    const state=start(),result=await N.prepare(state,{budgetMs:1000,shouldStop:()=>calls>=12});
+    const likely=R.apply(R.apply(state,{type:'pawn',to:13}),{type:'pawn',to:67}),expected=N.encode(likely);
+    assert.equal(result.visited,12);
+    assert.ok(inputs.some(input=>input.every((value,i)=>value===expected[i])),'the likely next search continuation should be ready within twelve evaluations');
+  }finally{N.clear();globalThis.WallzInference=inference;}
+});
+
+test('search reports prepared evaluations consumed separately from fresh model work',async()=>{
+  N.clear();const inference=globalThis.WallzInference;let calls=0;
+  globalThis.WallzInference={init:async()=>{},info:()=>({inferenceMs:1,backend:'fixture'}),evaluate:async()=>{calls++;return {logits:new Float32Array(136),value:.25};}};
+  try{
+    const opponent={...start(),turn:1},state=R.apply(opponent,{type:'pawn',to:67});
+    await N.prepare(opponent,{budgetMs:200,shouldStop:()=>calls>=6});
+    const before=calls,first=await N.analyse(state,{budgetMs:100,shouldStop:()=>true});
+    assert.equal(calls,before,'the actual opponent reply should reuse its prepared model evaluation');
+    assert.deepEqual(first.evaluationStats,{preparedHits:1,searchHits:0,fresh:0});
+    // A fresh tree after clearing, with no preparation, must report a model evaluation.
+    N.clear();
+    const cold=await N.analyse(state,{budgetMs:100,shouldStop:()=>true});
+    assert.deepEqual(cold.evaluationStats,{preparedHits:0,searchHits:0,fresh:1});
+  }finally{N.clear();globalThis.WallzInference=inference;}
+});
+
 test('cancelled preparation and other rulesets do not start model evaluation',async()=>{
   N.clear();const inference=globalThis.WallzInference;let calls=0;
   globalThis.WallzInference={init:async()=>{calls++;},evaluate:async()=>{throw new Error('Not needed');}};
