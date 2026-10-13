@@ -137,14 +137,28 @@ test('alternating opponent positions resume their own preparation progress',asyn
   }finally{N.clear();globalThis.WallzInference=inference;}
 });
 
-test('short preparation reaches likely continuations before sweeping every opponent wall',async()=>{
+test('short preparation retains original immediate-reply coverage priority',async()=>{
   N.clear();const inference=globalThis.WallzInference,inputs=[];let calls=0;
-  globalThis.WallzInference={init:async()=>{},evaluate:async input=>{calls++;inputs.push(Array.from(input));return {logits:Float32Array.from({length:136},(_,i)=>i===0?12:0),value:0};}};
+  globalThis.WallzInference={init:async()=>{},evaluate:async input=>{calls++;inputs.push(input);return {logits:Float32Array.from({length:136},(_,i)=>i===0?12:0),value:0};}};
   try{
     const state=start(),result=await N.prepare(state,{budgetMs:1000,shouldStop:()=>calls>=12});
-    const likely=R.apply(R.apply(state,{type:'pawn',to:13}),{type:'pawn',to:67}),expected=N.encode(likely);
+    const signature=input=>Buffer.from(input.buffer,input.byteOffset,input.byteLength).toString('base64');
+    const replies=new Set(R.successors(state).map(child=>signature(N.encode(child.state))));
     assert.equal(result.visited,12);
-    assert.ok(inputs.some(input=>input.every((value,i)=>value===expected[i])),'the likely next search continuation should be ready within twelve evaluations');
+    assert.ok(inputs.slice(1).every(input=>replies.has(signature(input))),'cover immediate replies before spending short waits on deeper guesses');
+  }finally{N.clear();globalThis.WallzInference=inference;}
+});
+
+test('preparation keeps four jobs and evicts the least recently used board',async()=>{
+  N.clear();const inference=globalThis.WallzInference;let calls=0;
+  globalThis.WallzInference={init:async()=>{},evaluate:async()=>{calls++;return {logits:new Float32Array(136),value:0};}};
+  try{
+    const boards=[start(),{...start(),pawns:[13,67]},{...start(),pawns:[22,58]},{...start(),pawns:[31,49]},{...start(),pawns:[31,40]}];
+    const slice=async state=>{const until=calls+3,progress=[];const result=await N.prepare(state,{budgetMs:1000,shouldStop:()=>calls>=until,onProgress:u=>progress.push(u.nodes)});return {result,initial:progress[0]};};
+    const first=await slice(boards[0]);for(const state of boards.slice(1,4))await slice(state);
+    const resumed=await slice(boards[0]);assert.equal(resumed.initial,first.result.visited);
+    await slice(boards[4]);const evicted=await slice(boards[1]);
+    assert.equal(evicted.initial,0,'the fifth board should evict the least recent job, while recently resumed work survives');
   }finally{N.clear();globalThis.WallzInference=inference;}
 });
 

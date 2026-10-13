@@ -319,12 +319,6 @@
     queue[index]=entry;
   }
   function takePreparation(job){
-    // Reserve four of every five picks for opponent-reply coverage. The remaining
-    // pick warms a likely continuation so short waits help beyond the next root.
-    if(job.replies.length&&(job.replyRun<4||!job.queue.length)){
-      job.replyRun++;return job.replies.shift();
-    }
-    job.replyRun=0;
     const queue=job.queue,entry=queue[0],last=queue.pop();
     if(queue.length){
       let index=0;
@@ -344,7 +338,7 @@
     const weights=logits.map(value=>Math.exp(value-max)),sum=weights.reduce((a,b)=>a+b,0),depth=entry.depth+1;
     const choices=children.map((child,index)=>({move:child.move,score:entry.score-Math.log(.9*weights[index]/sum+.1/children.length)+.35})).sort((a,b)=>a.score-b.score);
     if(entry.depth===0){
-      for(const choice of choices)job.replies.push({state:R.apply(entry.state,choice.move),depth,score:choice.score});
+      for(const choice of choices)enqueuePreparation(job,{state:R.apply(entry.state,choice.move),depth,score:choice.score,priority:-1});
     }else{
       enqueuePreparation(job,{state:entry.state,choices:choices.slice(0,16),index:0,depth,score:choices[0].score,priority:choices[0].score});
     }
@@ -359,13 +353,13 @@
       // Keep a small number of resumable jobs for round-robin tab scheduling.
       // Neural evaluation caches remain separately capped at 8192 entries each.
       if(preparations.size>=4)preparations.delete(preparations.keys().next().value);
-      job={queue:[],replies:[],replyRun:0,seen:new Set(),current:null,prepared:0,visited:0,sequence:0};
+      job={queue:[],seen:new Set(),current:null,prepared:0,visited:0,sequence:0};
       enqueuePreparation(job,{state,depth:0,score:0,priority:-2});
     }
     preparations.delete(key);preparations.set(key,job);
     let lastYield=start,lastProgress=start;options.onProgress?.({nodes:job.visited,phase:'prepare'});
     await init();
-    while(!expired()&&job.visited<8192&&(job.current||job.queue.length||job.replies.length)){
+    while(!expired()&&job.visited<8192&&(job.current||job.queue.length)){
       if(performance.now()-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();if(expired())break;}
       if(!job.current){
         const entry=takePreparation(job);
@@ -390,7 +384,7 @@
       const now=performance.now();
       if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:job.visited,phase:'prepare'});}
     }
-    return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done:job.visited>=8192||(!job.current&&!job.queue.length&&!job.replies.length),elapsedMs:Math.round(performance.now()-start)};
+    return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done:job.visited>=8192||(!job.current&&!job.queue.length),elapsedMs:Math.round(performance.now()-start)};
   }
   const api={analyse,prepare,encode,policyIndex,init,clear:()=>{evaluations.clear();positions.clear();preparedEvaluations.clear();preparations.clear();}};
   root.WallzNeural=api;if(typeof module!=='undefined')module.exports=api;
