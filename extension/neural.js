@@ -219,7 +219,7 @@
     const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)})||tacticalProof(state,performance.now()+Math.min(10,budget/10),options.shouldStop);
     if(proof?.move){
       const baseline=R.distances(state),child=R.apply(state,proof.move),after=R.distances(child),us=state.turn;
-      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],provenWin:true,engine:proof.kind==='tactical-route'?'exact-tactical-route':proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
+      return {candidates:[{move:proof.move,score:999,bound:'proven',winNow:child.winner===us,reply:null,ownDistance:after[us],opponentDistance:after[1-us],ownDelay:after[us]-baseline[us],opponentDelay:after[1-us]-baseline[1-us],route:R.path(child,us)}],provenWin:true,engine:proof.kind==='wall-sequence'?'exact-wall-sequence':proof.kind==='tactical-route'?'exact-tactical-route':proof.kind==='protected-route'?'exact-protected-route':'exact-race-bound',depth:proof.plies,nodes:0,elapsedMs:Math.round(performance.now()-start),paths:baseline};
     }
     const fallback=E.analyse(state,{budgetMs:Math.min(180,budget/4),maxDepth:3,shouldStop:options.shouldStop});
     if(proof?.value===-1)return {...fallback,candidates:fallback.candidates.map(candidate=>({...candidate,score:-999,bound:'proven'})),engine:'exact-tactical-route',provenWin:false,elapsedMs:Math.round(performance.now()-start)};
@@ -344,7 +344,9 @@
     }
   }
   async function prepare(state,options={}){
-    const start=performance.now(),deadline=start+Math.min(4000,Math.max(40,options.budgetMs||500));
+    const start=performance.now(),budget=Math.min(4000,Math.max(40,options.budgetMs||500)),end=start+budget;
+    const planning=!!E.proveWalls&&state.remaining.some(n=>n<=1)&&state.remaining.some(n=>n>0)&&Math.min(...R.distances(state))<=12;
+    const deadline=end-(planning?Math.min(100,budget*.2):0);
     const cancelled=()=>!!options.shouldStop?.(),expired=()=>performance.now()>=deadline||cancelled();
     if(state.variant!=='classic'||state.winner!=null||state.remaining.every(n=>n===0)||cancelled())return {prepared:0,visited:0,stopped:cancelled(),done:true};
     const key=R.stateKey(state);
@@ -353,7 +355,7 @@
       // Keep a small number of resumable jobs for round-robin tab scheduling.
       // Neural evaluation caches remain separately capped at 8192 entries each.
       if(preparations.size>=4)preparations.delete(preparations.keys().next().value);
-      job={queue:[],seen:new Set(),current:null,prepared:0,visited:0,sequence:0};
+      job={queue:[],seen:new Set(),current:null,prepared:0,visited:0,sequence:0,wallQueue:[],wallSeen:new Set()};
       enqueuePreparation(job,{state,depth:0,score:0,priority:-2});
     }
     preparations.delete(key);preparations.set(key,job);
@@ -377,6 +379,10 @@
         const cached=evaluations.has(entryKey)||preparedEvaluations.has(entryKey);
         entry.answer=await predict(entry.state,true);job.seen.add(entryKey);
         job.visited++;if(!cached)job.prepared++;
+        if(planning&&entry.depth<=2&&!job.wallSeen.has(entryKey)){
+          job.wallSeen.add(entryKey);
+          for(const player of [entry.state.turn,1-entry.state.turn])if(entry.state.remaining[1-player]<=1&&entry.state.remaining[player]>0)job.wallQueue.push({state:entry.state,player,score:entry.score,attempts:0});
+        }
       }
       if(expired())break;
       schedulePreparation(job,entry);
@@ -384,9 +390,16 @@
       const now=performance.now();
       if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:job.visited,phase:'prepare'});}
     }
-    const done=job.visited>=8192||(!job.current&&!job.queue.length);
+    while(planning&&job.wallQueue.length&&performance.now()<end&&!cancelled()){
+      job.wallQueue.sort((a,b)=>a.state.remaining[1-a.player]-b.state.remaining[1-b.player]||a.score+a.attempts-b.score-b.attempts);
+      const plan=job.wallQueue.shift();plan.attempts++;
+      const answer=E.proveWalls(plan.state,{player:plan.player,budgetMs:Math.min(100,end-performance.now()),shouldStop:cancelled});
+      if(!answer.proof&&!answer.complete)job.wallQueue.push(plan);
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    const done=(job.visited>=8192||(!job.current&&!job.queue.length))&&!job.wallQueue.length;
     // Completed jobs cannot resume; retain their counters and cached outputs.
-    if(done){job.queue.length=0;job.seen.clear();job.current=null;}
+    if(done){job.queue.length=0;job.seen.clear();job.wallSeen.clear();job.current=null;}
     return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done,elapsedMs:Math.round(performance.now()-start)};
   }
   const api={analyse,prepare,encode,policyIndex,init,clear:()=>{evaluations.clear();positions.clear();preparedEvaluations.clear();preparations.clear();}};

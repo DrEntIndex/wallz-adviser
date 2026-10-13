@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Wallz Adviser",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
   "cross_origin_embedder_policy": { "value": "require-corp" },
   "cross_origin_opener_policy": { "value": "same-origin" },

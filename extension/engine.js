@@ -311,6 +311,7 @@
     try{
       if(winner>=0)return {value:winner===turn?1:-1,plies:0};
       if(immediate(turn))return {value:1,plies:1};
+      const sequence=cachedWallProof();if(sequence)return sequence;
       const race=options.protectedOnly?null:raceProof(),value=race??protectedRace();
       if(value===null)return null;
       const move=race>90000&&!hand[1-turn]?raceWinningMove():race===null&&value>90000?proofCache.get(lo+':'+hi)?.move:null;
@@ -402,5 +403,63 @@
       if(threatCache.size>=12000)threatCache.clear();threatCache.set(key,result);return result;
     }catch(error){if(error!==TIMEOUT)throw error;return null;}
   }
-  const api={analyse,evaluate,certify,proveThreat};root.WallzEngine=api;if(typeof module!=='undefined')module.exports=api;
+
+  const wallProofs=new Map(),wallAttempts=new Map();
+
+  function cachedWallProof(){
+    if(!wallProofs.size)return null;
+    for(let player=0;player<2;player++){
+      const result=wallProofs.get([player,variant,turn,...pawn,...hand,...bits].join(':'));
+      if(result)return {value:turn===player?1:-1,plies:result.plies,...(result.move!==null?{move:external(result.move)}:{}),kind:'wall-sequence'};
+    }
+    return null;
+  }
+
+  function proveWalls(state,options={}){
+    const start=performance.now(),player=options.player??state.turn,enemy=1-player;
+    if(options.shouldStop?.())return {proof:null,nodes:0,complete:false,elapsedMs:0};
+    if((player!==0&&player!==1)||state.variant!=='classic'||state.winner!=null||state.remaining[enemy]>1||!state.remaining[player]||Math.min(...R.distances(state))>12)return {proof:null,nodes:0,complete:true,elapsedMs:0};
+    deadline=start+Math.min(1000,Math.max(1,Number(options.budgetMs)||40));report=null;stop=options.shouldStop||null;nodes=0;load(state);history.fill(0);killers.fill(-1);
+    const memo=wallAttempts,depthLimit=Math.min(24,Math.max(4,options.maxDepth||12)),width=Math.min(24,Math.max(1,options.wallWidth||8));
+    const key=()=>[player,variant,turn,...pawn,...hand,...bits].join(':');
+    function force(depth){
+      nodes++;check();if(memo.size>=32768)memo.clear();const k=key();if(wallProofs.has(k))return wallProofs.get(k);
+      if(winner>=0)return winner===player?{plies:0,move:null}:null;
+      if(immediate(turn)){
+        if(turn!==player)return null;
+        const out=pawnLists[sp],n=movesFor(turn,out);
+        for(let i=0;i<n;i++)if((out[i]/9|0)===goals[turn])return {plies:1,move:out[i]};
+      }
+      const mk=k+':'+depth+':'+width;if(memo.has(mk))return memo.get(mk);
+      const race=raceProof();
+      if(race!==null&&Math.sign(race)===(turn===player?1:-1)&&Math.abs(race)>90000){
+        const move=sp===0&&turn===player?raceWinningMove():null;
+        return {plies:WIN-Math.abs(race)-sp,move:move?move.to:null};
+      }
+      if(depth<=0)return null;
+      const attack=turn===player,n=generate(sp,true,-1,true),list=lists[sp];
+      let walls=0,longest=0,count=0,result=null;
+      for(let i=0;i<n;i++){
+        const move=list[i];if(attack&&move>=128&&walls++>=width)continue;
+        if(!make(move))continue;count++;let child;
+        try{child=force(depth-1);}finally{undo();}
+        if(attack){if(child){result={plies:child.plies+1,move};break;}}
+        else{if(!child){memo.set(mk,null);return null;}longest=Math.max(longest,child.plies+1);}
+      }
+      if(!attack&&count)result={plies:longest,move:null};
+      memo.set(mk,result);
+      if(result){if(wallProofs.size>=8192)wallProofs.clear();wallProofs.set(k,result);}
+      return result;
+    }
+    let proof=null,depth=0;
+    try{for(depth=4;depth<=depthLimit;depth+=2){
+      const result=force(depth);
+      if(result){proof={value:state.turn===player?1:-1,plies:result.plies,...(result.move!==null?{move:external(result.move)}:{}),kind:'wall-sequence'};break;}
+    }}catch(error){if(error!==TIMEOUT)throw error;}
+    finally{report=null;stop=null;}
+    if(sp!==0||ep!==0)throw new Error('Wall proof state was not restored');
+    return {proof,nodes,complete:proof!==null||depth>depthLimit,depth:Math.min(depth,depthLimit),elapsedMs:Math.round(performance.now()-start)};
+  }
+
+  const api={proveWalls,analyse,evaluate,certify,proveThreat};root.WallzEngine=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
