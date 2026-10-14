@@ -1,0 +1,11 @@
+{
+  "format": "ka15-v1",
+  "input": "x:0",
+  "policy": "Softmax_5:0",
+  "value": "Tanh:0",
+  "sha256": "7652c5209f82aad039e53f49ced29819f8b3b29c35a4df367b4ccd891bb5a4cd",
+  "batch": {
+    "size": 4,
+    "sha256": "41472e3efe0573a90a2855727d6292bb4742bfebd140709619fd4617d304a611"
+  }
+}

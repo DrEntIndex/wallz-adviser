@@ -28,7 +28,7 @@
   function init(){
     return root.WallzInference.init();
   }
-  async function predict(state,preparing=false,stats=null){
+  async function predict(state,preparing=false,stats=null,batching=false){
     const key=R.stateKey(state),cached=evaluations.get(key)||preparedEvaluations.get(key);
     if(cached){
       if(stats)stats[preparedEvaluations.has(key)&&!evaluations.has(key)?'preparedHits':'searchHits']++;
@@ -39,12 +39,12 @@
       return cached;
     }
     if(stats)stats.fresh++;
-    const answer=await root.WallzInference.evaluate(encode(state)),cache=preparing?preparedEvaluations:evaluations;
+    const answer=(batching&&root.WallzInference.info().batchSize>1?await root.WallzInference.evaluateStateBatched(state):root.WallzInference.evaluateState?await root.WallzInference.evaluateState(state):await root.WallzInference.evaluate(encode(state))),cache=preparing?preparedEvaluations:evaluations;
     if(cache.size>=8192)cache.delete(cache.keys().next().value);cache.set(key,answer);return answer;
   }
   function position(state){
     const key=R.stateKey(state);let node=positions.get(key);
-    if(!node){node={key,state,edges:null,visits:0,solved:null,mate:null,value:0,parents:new Set()};positions.set(key,node);}
+    if(!node){node={key,state,edges:null,visits:0,solved:null,mate:null,value:0,pending:null,parents:new Set()};positions.set(key,node);}
     return node;
   }
   const proofQueue=[];let resolving=false;
@@ -111,7 +111,7 @@
     return ranked.sort((a,b)=>b.score-a.score||a.move.wall-b.move.wall).slice(0,3).map(entry=>entry.move);
   }
 
-  async function expand(node,predictor){
+  async function expandNode(node,predictor){
     const state=node.state,certificate=E.certify(state,{budgetMs:12});
     if(certificate){solved(node,certificate.value,certificate.plies);return node.value;}
     const children=R.successors(state),moves=children.map(entry=>entry.move);
@@ -130,16 +130,17 @@
     const logits=safe.map(edge=>output.logits[policyIndex(state,edge.move)]),max=Math.max(...logits);
     const probabilities=logits.map(value=>Math.exp(value-max)),sum=probabilities.reduce((a,b)=>a+b,0);
     for(let i=0;i<safe.length;i++)safe[i].prior=probabilities[i]/sum;
-    node.edges=edges;node.value=output.value;node.probes=forcingMoves(state,children).map(move=>edges.find(edge=>R.moveKey(edge.move)===R.moveKey(move))).filter(edge=>edge&&edge.child?.solved!==1);return node.value;
+    node.edges=edges;node.value=node.solved??output.value;node.probes=forcingMoves(state,children).map(move=>edges.find(edge=>R.moveKey(edge.move)===R.moveKey(move))).filter(edge=>edge&&edge.child?.solved!==1);updateSolved(node);return node.value;
   }
-  function select(node,forcing=false){
-    if(forcing&&node.probes?.length){while(node.probes.length){const edge=node.probes.shift();if(edge.visits===0&&edge.child?.solved!==1)return edge;}}
-    const scale=Math.sqrt(Math.max(1,node.visits)),exploration=1.25+Math.log((node.visits+19653)/19652);
+  function expand(node,predictor){if(node.pending)return node.pending;const pending=expandNode(node,predictor);node.pending=pending;return pending.finally(()=>{node.pending=null;});}
+  function select(node,forcing=false,profile={exploration:1.25,fpu:.2}){
+    if(forcing&&node.probes?.length){while(node.probes.length){const edge=node.probes.shift();if(edge.visits===0&&edge.child?.solved!==1&&!edge.child?.pending)return edge;}}
+    const scale=Math.sqrt(Math.max(1,node.visits)),exploration=profile.exploration+Math.log((node.visits+19653)/19652);
     let total=0,visits=0,prior=0;
     for(const edge of node.edges)if(edge.visits){total+=edge.total;visits+=edge.visits;prior+=edge.prior;}
-    const firstPlay=(visits?total/visits:node.value)-.2*Math.sqrt(prior);
+    const firstPlay=(visits?total/visits:node.value)-profile.fpu*Math.sqrt(prior);
     let best=null,score=-Infinity;
-    for(const edge of node.edges){const solved=edge.child?.solved;
+    for(const edge of node.edges){if(edge.child?.pending)continue;const solved=edge.child?.solved;
       const q=edge.visits?edge.total/edge.visits:firstPlay;
       const value=solved===-1?10000-(edge.child.mate??1000):solved===1?-10000+(edge.child.mate??0):q+exploration*edge.prior*scale/(1+edge.visits);
       if(value>score){score=value;best=edge;}
@@ -214,7 +215,7 @@
     const start=performance.now(),{normal:budget,maximum}=thinkingBudget(options),hardDeadline=start+maximum-30;
     let deadline=start+budget-30;
     const evaluationStats={preparedHits:0,searchHits:0,fresh:0};
-    const predictor=options.predictor||(state=>predict(state,false,evaluationStats)),opening=budget>=1000?openingMove(state,options.opening):null;
+    const predictor=options.predictor||(state=>predict(state,false,evaluationStats,true)),opening=budget>=1000?openingMove(state,options.opening):null;
     if(state.variant==='race')return {...E.analyse(state,{budgetMs:budget,onProgress:options.onProgress,shouldStop:options.shouldStop}),engine:'race-search'};
     const proof=E.certify(state,{budgetMs:Math.min(45,budget/8)})||tacticalProof(state,performance.now()+Math.min(10,budget/10),options.shouldStop);
     if(proof?.move){
@@ -232,6 +233,7 @@
       finally{clearTimeout(timeout);}
     }
     if(positions.size>12000)positions.clear();
+    const info=!options.predictor?root.WallzInference.info():{},batchSize=info.batchSize||1,profile=info.model==='ka'?{exploration:2,fpu:.1}:{exploration:1.25,fpu:.2};
     const rootNode=position(state);
     if(!rootNode.edges&&rootNode.solved===null)await expand(rootNode,predictor);
     if(!rootNode.edges)return {...fallback,engine:'exact-tactics',provenWin:rootNode.solved===1||best?.winNow===true,elapsedMs:Math.round(performance.now()-start)};
@@ -247,8 +249,7 @@
     const sample=()=>{const choice=searchChoice(rootNode);if(choice){samples.push(choice);if(samples.length>4)samples.shift();}};
     options.onProgress?.({nodes:0,phase:'search'});
     while(!options.shouldStop?.()&&rootNode.solved===null){
-      const now=performance.now(),reserve=Math.max(4,(options.predictor?1:root.WallzInference.info().inferenceMs)*1.5);
-      // Uncertainty keeps the original deadline; never force an opening move.
+      const now=performance.now(),reserve=Math.max(4,(options.predictor?1:batchSize>1?(root.WallzInference.info().batchMs||info.inferenceMs*batchSize):root.WallzInference.info().inferenceMs)*1.5);
       if(opening&&now-start>=250&&now-start<=750&&!probes.length&&!guards.some(edge=>edge.child?.solved==null&&edge.visits<8)&&openingSettled(rootNode,opening,openingSamples)){
         deadline=now;openingFastPath=true;break;
       }
@@ -258,21 +259,31 @@
         deadline=Math.min(hardDeadline,deadline+500);
         if(now+reserve>=deadline)break;
       }
-      let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
-      while(node.edges&&node.solved===null&&path.length<100){
-        const edge=node===rootNode&&probes.length?probes.shift():select(node,path.length<=2);if(!edge)break;
-        if(!edge.child)connect(node,edge,R.apply(node.state,edge.move));
-        path.push({node,edge});node=edge.child;
-        if(seen.has(node.key)){cycle=true;break;}seen.add(node.key);
-        if(performance.now()>=deadline)break;
+      const pending=[];
+      for(let slot=0;slot<batchSize&&!options.shouldStop?.()&&performance.now()+reserve<deadline&&rootNode.solved===null;slot++){
+        let node=rootNode,value=0,cycle=false;const path=[],seen=new Set([node.key]);
+        while(node.edges&&node.solved===null&&path.length<100){
+          const edge=node===rootNode&&probes.length?probes.shift():select(node,path.length<=2,profile);if(!edge)break;
+          if(!edge.child)connect(node,edge,R.apply(node.state,edge.move));
+          path.push({node,edge});node=edge.child;
+          if(seen.has(node.key)){cycle=true;break;}seen.add(node.key);
+          if(performance.now()>=deadline)break;
+        }
+        if(node.pending)continue;
+        for(const entry of path){entry.edge.visits++;entry.edge.total--;entry.node.visits++;}
+        pending.push((async()=>{
+          try{
+            if(cycle)value=0;
+            else if(!node.edges&&node.solved===null&&performance.now()<deadline)value=await expand(node,predictor);
+            else if(node.solved!==null)value=node.solved;
+            else if(node.edges)value=node.value;
+          }finally{for(const entry of path){entry.edge.visits--;entry.edge.total++;entry.node.visits--;}}
+          node.visits++;
+          for(let i=path.length-1;i>=0;i--){value=-value;const entry=path[i];entry.edge.visits++;entry.edge.total+=value;entry.node.visits++;updateSolved(entry.node);}
+          simulations++;maxDepth=Math.max(maxDepth,path.length);
+        })());
       }
-      if(cycle)value=0;
-      else if(!node.edges&&node.solved===null&&performance.now()<deadline)value=await expand(node,predictor);
-      else if(node.solved!==null)value=node.solved;
-      else if(node.edges)value=node.value;
-      node.visits++;
-      for(let i=path.length-1;i>=0;i--){value=-value;const entry=path[i];entry.edge.visits++;entry.edge.total+=value;entry.node.visits++;updateSolved(entry.node);}
-      simulations++;maxDepth=Math.max(maxDepth,path.length);
+      const completed=await Promise.allSettled(pending);const failed=completed.find(r=>r.status==='rejected');if(failed)throw failed.reason;
       const completedAt=performance.now();
       if(opening&&completedAt-start<=750&&completedAt-lastOpeningSample>=50){
         lastOpeningSample=completedAt;const choice=searchChoice(rootNode);if(choice){openingSamples.push(choice);if(openingSamples.length>3)openingSamples.shift();}

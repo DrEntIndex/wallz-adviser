@@ -2,13 +2,13 @@
 
 Wallz Adviser is a local **Wallz bot and Chrome extension for [wallz.gg](https://www.wallz.gg/)**. Get move and wall suggestions directly on the board, a faint path to the goal, and optional autoplay. Neural evaluation and lookahead search run on your computer, with GPU acceleration when available.
 
-**Chrome 116+ · Windows / macOS · Local CPU / GPU analysis · MIT license**
+**Chrome 116+ · Windows / macOS · Local CPU / GPU analysis · MIT project code**
 
-**[Download ZIP](https://github.com/slimfeet674/wallz-adviser/archive/refs/heads/main.zip)** · [Installation](#install) · [Report a bug](https://github.com/slimfeet674/wallz-adviser/issues/new/choose) · [Contribute](CONTRIBUTING.md)
+**[Download ZIP](https://github.com/DrEntIndex/wallz-adviser/archive/refs/heads/main.zip)** · [Installation](#install) · [Report a bug](https://github.com/DrEntIndex/wallz-adviser/issues/new/choose) · [Contribute](CONTRIBUTING.md)
 
 ## Install
 
-1. [Download the project ZIP](https://github.com/slimfeet674/wallz-adviser/archive/refs/heads/main.zip) and extract it.
+1. [Download the project ZIP](https://github.com/DrEntIndex/wallz-adviser/archive/refs/heads/main.zip) and extract it.
 2. Open **Chrome** and go to `chrome://extensions`.
 3. Turn on **Developer mode**, then click **Load unpacked**.
 4. Select the **extension** folder inside the extracted project. This is the folder containing `manifest.json`.
@@ -46,7 +46,24 @@ The extension reads the current board, checks legal moves and walls, and looks a
 
 The model is bundled with the extension. Analysis runs locally, without sending positions to an analysis server. There is no extension telemetry.
 
+This private copy includes ka's epoch4225 model as the default evaluator. It adds board connectivity and legal wall placement features. The extension automatically uses four-position GPU batches when they match CPU results and improve throughput. Legal moves, win certificates, and the six-second maximum thinking budget remain separate from the model's estimates. The previous Sigma model remains available as a fallback if the ka files are missing or fail integrity checks.
+
 Suggestions are estimates, not guaranteed wins. Wallz updates can change how the board is read; if the extension stops recognizing it, the reader may need an update.
+
+### Model conversion
+
+The ka files are already included in this private copy, so normal installation needs no conversion. To recreate them, obtain the **epoch4225** checkpoint through the download link in the [author's repository](https://github.com/sugiyama2718/Quoridor). See [credits](CREDITS.md) for attribution and the unresolved redistribution terms.
+
+Conversion requires Python 3.11 and these packages, on the computer doing the conversion:
+
+```sh
+python -m pip install tensorflow==2.15.1 tf2onnx==1.16.1 onnx==1.16.2 numpy==1.26.4
+python scripts/convert-ka.py "path/to/epoch4225.ckpt"
+```
+
+Keep the checkpoint's `.meta`, `.index`, and `.data-00000-of-00001` files together. Pass the prefix ending in `.ckpt`, not one of those individual files. Conversion creates `ka.onnx`, `ka-batch.onnx`, and `ka.json` in `extension/models`. Reload the extension and refresh Wallz to activate them. No model selector or Python process is needed during play.
+
+For your own Mac, copy those three generated files into its `extension/models` folder and reload the extension there. CPU fallback remains available when WebGPU or batching is unavailable. Removing the three files restores the bundled evaluator.
 
 ## Common questions
 
@@ -60,7 +77,7 @@ Yes. Enable **Autoplay best move** in the gear menu. You still open and join gam
 
 ## License and credits
 
-Original project code is available under the [MIT license](LICENSE). The bundled model and inference runtime have their own MIT notices. See [credits](CREDITS.md) for their sources and details.
+Original project code is available under the [MIT license](LICENSE). The Sigma model and inference runtime have their own MIT notices. The ka weights have separate, unresolved redistribution terms and are not covered by the project's MIT license. See [credits](CREDITS.md) for their sources and details.
 
 This is an independent project and isn't affiliated with Wallz.
 
@@ -77,6 +94,6 @@ Browser-check scripts additionally require Playwright and an installed Chromium 
 
 ## Help and contributions
 
-Found a problem or have an idea? [Open an issue](https://github.com/slimfeet674/wallz-adviser/issues/new/choose). Include your browser, operating system, and steps to reproduce a bug. Pull requests are welcome; see the [contribution guide](CONTRIBUTING.md).
+Found a problem or have an idea? [Open an issue](https://github.com/DrEntIndex/wallz-adviser/issues/new/choose). Include your browser, operating system, and steps to reproduce a bug. Pull requests are welcome; see the [contribution guide](CONTRIBUTING.md).
 
-If Wallz Adviser is useful to you, consider [starring the repository](https://github.com/slimfeet674/wallz-adviser).
+If Wallz Adviser is useful to you, consider [starring the repository](https://github.com/DrEntIndex/wallz-adviser).
