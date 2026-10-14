@@ -1,0 +1,13 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const os=require('node:os');
+const {execFileSync}=require('node:child_process');
+const {createHash}=require('node:crypto');
+const compiler=process.env.WALLZ_ZIG||'zig';
+const source=path.join(__dirname,'native');
+const output=path.join(__dirname,'../extension/distance.wasm');
+const cache=path.join(os.tmpdir(),'wallz-distance-zig-cache');
+const version=execFileSync(compiler,['version'],{encoding:'utf8'}).trim();
+if(version!=='0.13.0')throw new Error('Building distance.wasm requires Zig 0.13.0');
+execFileSync(compiler,['build-exe','distance.c','-target','wasm32-freestanding','-O','ReleaseFast','-fstrip','-fno-entry','-rdynamic','-femit-bin='+output,'--cache-dir',cache],{cwd:source,stdio:'inherit'});
+console.log('distance.wasm SHA-256: '+createHash('sha256').update(fs.readFileSync(output)).digest('hex'));

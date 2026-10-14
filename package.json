@@ -1,6 +1,6 @@
 {
   "name": "wallz-adviser",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "license": "MIT",
   "description": "Local Wallz.gg bot and Chrome extension with move and wall suggestions, optional autoplay, and CPU/WebGPU acceleration",
@@ -20,7 +20,8 @@
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "check": "node scripts/check.cjs",
-    "benchmark": "node scripts/benchmark.cjs"
+    "benchmark": "node scripts/benchmark.cjs",
+    "build:distance": "node scripts/build-distance-wasm.cjs"
   },
   "engines": {
     "node": ">=20"

@@ -13,6 +13,7 @@ for(const script of [...manifest.content_scripts.flatMap(s=>s.js),manifest.backg
 if(JSON.stringify(manifest.permissions)!==JSON.stringify(['offscreen','storage']) || manifest.host_permissions?.length) throw new Error('Unexpected extension permissions');
 for(const script of ['compute.js','compute-worker.js','compute-host.js','compute-host.html'])if(!fs.existsSync(path.join(root,'extension',script)))throw new Error('Missing compute resource: '+script);
 const resources={
+  'distance.wasm':'75d2db9bb17248d8b53ddc4e2e41626607782b8d060878ba1b472fbdeb9f7dcf',
   'vendor/ort.webgpu.worker.min.js':'916a2187a9f6db02fde93de3ac83d463e379eea97ba29152544e3c9701e3c8e7',
   'vendor/ort-wasm-simd-threaded.jsep.js':'12a93fdabc2a97bb67895291ba45011f752a275afa973c89ad596a3fa54daacc',
   'vendor/ort-wasm-simd-threaded.jsep.worker.js':'f3409639351a936786e949c0f99762ad35228d4a63176893ec3511604c3ef2cf',

@@ -26,7 +26,7 @@
     return directions.findIndex(d=>d[0]===dx&&d[1]===dy);
   }
   function init(){
-    return root.WallzInference.init();
+    return Promise.all([R.initDistanceMaps?.(),root.WallzInference.init()]);
   }
   async function predict(state,preparing=false,stats=null,batching=false){
     const key=R.stateKey(state),cached=evaluations.get(key)||preparedEvaluations.get(key);
@@ -105,6 +105,7 @@
     for(const entry of children){
       if(entry.move.type!=='wall')continue;
       const after=R.distances(entry.state),gain=after[them]-base[them]-(after[us]-base[us])-1;
+      if(gain<3&&state.remaining[0]+state.remaining[1]>6)continue;
       const restricted=mobility-R.pawnMoves(entry.state,them).length;
       if(gain>=3||(restricted>0&&state.remaining[0]+state.remaining[1]<=6))ranked.push({move:entry.move,score:Math.max(0,gain)+restricted*2});
     }
@@ -354,6 +355,15 @@
       enqueuePreparation(job,{state:entry.state,choices:choices.slice(0,16),index:0,depth,score:choices[0].score,priority:choices[0].score});
     }
   }
+  function nextPreparation(job){
+    const entry=takePreparation(job);
+    if(!entry.choices)return entry;
+    const choice=entry.choices[entry.index++],next={state:R.apply(entry.state,choice.move),depth:entry.depth,score:choice.score};
+    if(entry.index<entry.choices.length){
+      entry.score=entry.choices[entry.index].score;entry.priority=entry.score;enqueuePreparation(job,entry);
+    }
+    return next;
+  }
   async function prepare(state,options={}){
     const start=performance.now(),budget=Math.min(4000,Math.max(40,options.budgetMs||500)),end=start+budget;
     const planning=!!E.proveWalls&&state.remaining.some(n=>n<=1)&&state.remaining.some(n=>n>0)&&Math.min(...R.distances(state))<=12;
@@ -363,41 +373,40 @@
     const key=R.stateKey(state);
     let job=preparations.get(key);
     if(!job){
-      // Keep a small number of resumable jobs for round-robin tab scheduling.
-      // Neural evaluation caches remain separately capped at 8192 entries each.
       if(preparations.size>=4)preparations.delete(preparations.keys().next().value);
-      job={queue:[],seen:new Set(),current:null,prepared:0,visited:0,sequence:0,wallQueue:[],wallSeen:new Set()};
+      job={queue:[],seen:new Set(),current:[],prepared:0,visited:0,sequence:0,wallQueue:[],wallSeen:new Set()};
       enqueuePreparation(job,{state,depth:0,score:0,priority:-2});
     }
     preparations.delete(key);preparations.set(key,job);
     let lastYield=start,lastProgress=start;options.onProgress?.({nodes:job.visited,phase:'prepare'});
     await init();
-    while(!expired()&&job.visited<8192&&(job.current||job.queue.length)){
+    const batchSize=Math.min(4,Math.max(1,Math.floor(Number(root.WallzInference.info?.()?.batchSize)||1)));
+    while(!expired()&&job.visited<8192&&(job.current?.length||job.queue.length)){
       if(performance.now()-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();if(expired())break;}
-      if(!job.current){
-        const entry=takePreparation(job);
-        if(entry.choices){
-          const choice=entry.choices[entry.index++];
-          job.current={state:R.apply(entry.state,choice.move),depth:entry.depth,score:choice.score};
-          if(entry.index<entry.choices.length){
-            entry.score=entry.choices[entry.index].score;entry.priority=entry.score;enqueuePreparation(job,entry);
-          }
-        }else job.current=entry;
+      if(!job.current?.length){
+        job.current=[];
+        const pendingKeys=new Set(),limit=Math.min(batchSize,8192-job.visited);
+        while(job.queue.length&&job.current?.length<limit&&!expired()){
+          if(performance.now()-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();if(expired())break;}
+          const entry=nextPreparation(job),entryKey=R.stateKey(entry.state);
+          if(job.seen.has(entryKey)||pendingKeys.has(entryKey)||entry.state.winner!=null)continue;
+          pendingKeys.add(entryKey);job.current.push(entry);
+        }
       }
-      const entry=job.current,entryKey=R.stateKey(entry.state);
-      if(!entry.answer){
-        if(job.seen.has(entryKey)||entry.state.winner!=null){job.current=null;continue;}
-        const cached=evaluations.has(entryKey)||preparedEvaluations.has(entryKey);
-        entry.answer=await predict(entry.state,true);job.seen.add(entryKey);
-        job.visited++;if(!cached)job.prepared++;
+      if(expired())break;
+      const results=await Promise.allSettled(job.current.filter(entry=>!entry.answer).map(async entry=>{
+        const entryKey=R.stateKey(entry.state),cached=evaluations.has(entryKey)||preparedEvaluations.has(entryKey);
+        entry.answer=await predict(entry.state,true,null,batchSize>1);
+        job.seen.add(entryKey);job.visited++;if(!cached)job.prepared++;
         if(planning&&entry.depth<=2&&!job.wallSeen.has(entryKey)){
           job.wallSeen.add(entryKey);
           for(const player of [entry.state.turn,1-entry.state.turn])if(entry.state.remaining[1-player]<=1&&entry.state.remaining[player]>0)job.wallQueue.push({state:entry.state,player,score:entry.score,attempts:0});
         }
+      }));
+      const failed=results.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+      while(job.current?.length&&!expired()){
+        schedulePreparation(job,job.current[0]);job.current.shift();
       }
-      if(expired())break;
-      schedulePreparation(job,entry);
-      job.current=null;
       const now=performance.now();
       if(options.onProgress&&now-lastProgress>=250){lastProgress=now;options.onProgress({nodes:job.visited,phase:'prepare'});}
     }
@@ -408,8 +417,7 @@
       if(!answer.proof&&!answer.complete)job.wallQueue.push(plan);
       await new Promise(resolve=>setTimeout(resolve,0));
     }
-    const done=(job.visited>=8192||(!job.current&&!job.queue.length))&&!job.wallQueue.length;
-    // Completed jobs cannot resume; retain their counters and cached outputs.
+    const done=(job.visited>=8192||(!job.current?.length&&!job.queue.length))&&!job.wallQueue.length;
     if(done){job.queue.length=0;job.seen.clear();job.wallSeen.clear();job.current=null;}
     return {prepared:job.prepared,visited:job.visited,stopped:cancelled(),done,elapsedMs:Math.round(performance.now()-start)};
   }

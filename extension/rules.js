@@ -43,15 +43,37 @@
     return s;
   }
 
-  function conflicts(w, walls) {
-    const a = wallCoords(w);
-    return walls.some(v => {
-      const b = wallCoords(v);
-      return a.x === b.x && a.y === b.y || a.o === b.o && (a.o === 'h' ? a.y === b.y && Math.abs(a.x-b.x) === 1 : a.x === b.x && Math.abs(a.y-b.y) === 1);
-    });
+  function conflicts(w,walls) {
+    const anchor=w&63;
+    for(const v of walls){
+      if((v&63)===anchor)return true;
+      if(((w^v)&64)!==0)continue;
+      if(w<64?((w>>3)===(v>>3)&&Math.abs(w-v)===1):((w&7)===(v&7)&&Math.abs(w-v)===8))return true;
+    }
+    return false;
+  }
+
+  let accelerator=null,acceleratorReady=null;
+  function initDistanceMaps(bytes){
+    if(acceleratorReady)return acceleratorReady;
+    acceleratorReady=(async()=>{
+      if(!root.WebAssembly)return false;
+      if(!bytes){
+        if(!root.chrome?.runtime?.getURL&&!root.location)return false;
+        const url=root.chrome?.runtime?.getURL?root.chrome.runtime.getURL('distance.wasm'):new URL('distance.wasm',root.location.href).href;
+        const response=await fetch(url);if(!response.ok)return false;bytes=await response.arrayBuffer();
+      }
+      const {instance}=await root.WebAssembly.instantiate(bytes),exports=instance.exports;
+      const input=new Int16Array(exports.memory.buffer,exports.input_pointer(),324),output=new Int16Array(exports.memory.buffer,exports.output_pointer(),81);
+      input.set(emptyEdges);
+      for(const row of [0,8]){exports.calculate(row);const expected=distanceMap(emptyEdges,row);if(output.some((value,p)=>value!==expected[p]))return false;}
+      accelerator={input,output,calculate:exports.calculate};return true;
+    })().catch(()=>false);
+    return acceleratorReady;
   }
 
   function distanceMap(edges, row) {
+    if(accelerator){accelerator.input.set(edges);accelerator.calculate(row);return accelerator.output.slice();}
     const distances = new Int16Array(81).fill(-1);
     const queue = new Uint8Array(81);
     let head = 0, tail = 0;
@@ -66,21 +88,32 @@
     return distances;
   }
 
-  function graph(s) {
+  function graph(s,parent,wall) {
     const key=s.variant + ':' + s.walls.join('.');
     const cached=graphCache.get(key);
-    if (cached) return cached;
-    const edges=emptyEdges.slice();
-    function block(p,d) { const q=edges[p*4+d]; edges[p*4+d]=-1; if(q>=0) edges[q*4+REVERSE[d]]=-1; }
-    for (const w of s.walls) {
-      const a=wallCoords(w), p=a.y*9+a.x;
-      if (a.o==='h') { block(p,1); block(p+1,1); }
-      else { block(p,3); block(p+9,3); }
+    if(cached)return cached;
+    const edges=(parent?parent.edges:emptyEdges).slice();
+    function block(p,d){const q=edges[p*4+d];edges[p*4+d]=-1;if(q>=0)edges[q*4+REVERSE[d]]=-1;}
+    for(const w of parent?[wall]:s.walls){
+      const x=w&7,y=(w&63)>>3,p=y*9+x;
+      if(w<64){block(p,1);block(p+1,1);}else{block(p,3);block(p+9,3);}
     }
-    const maps=[distanceMap(edges,goal(s,0)),distanceMap(edges,goal(s,1))];
+    const maps=[0,1].map(player=>{
+      if(parent){
+        const map=parent.maps[player],p=((wall&63)>>3)*9+(wall&7);
+        let changed=false;
+        for(const cell of [p,p+1,p+9,p+10]){
+          if(map[cell]<=0)continue;
+          let step=false;
+          for(let d=0;d<4;d++){const next=edges[cell*4+d];if(next>=0&&map[next]===map[cell]-1){step=true;break;}}
+          if(!step){changed=true;break;}
+        }
+        if(!changed)return map;
+      }
+      return distanceMap(edges,goal(s,player));
+    });
     const result={edges,maps};
-
-    if (graphCache.size>=12000) graphCache.delete(graphCache.keys().next().value);
+    if(graphCache.size>=12000)graphCache.delete(graphCache.keys().next().value);
     graphCache.set(key,result);
     return result;
   }
@@ -104,11 +137,13 @@
 
   function distances(s) { const {maps}=graph(s); return s.pawns.map((p,i)=>maps[i][p]); }
 
-  function wallChild(s,w) {
-    if (!Number.isInteger(w) || w<0 || w>=128 || s.remaining[s.turn]<=0 || conflicts(w,s.walls)) return null;
+  function wallChild(s,w,knownLegal=false) {
+    if (!knownLegal&&(!Number.isInteger(w) || w<0 || w>=128 || s.remaining[s.turn]<=0 || conflicts(w,s.walls))) return null;
     const child={...s,turn:1-s.turn,walls:[...s.walls,w].sort((a,b)=>a-b),remaining:s.remaining.slice()};
     child.remaining[s.turn]--;
-    return distances(child).every(n=>n>=0)?child:null;
+    if(knownLegal)return child;
+    const maps=graph(child,graph(s),w).maps;
+    return maps[0][s.pawns[0]]>=0&&maps[1][s.pawns[1]]>=0?child:null;
   }
 
   function legalWall(s,w) { return wallChild(s,w)!==null; }
@@ -118,19 +153,41 @@
     child.winner=onGoal(child,s.turn)?s.turn:null;return child;
   }
 
+  function wallOptions(s) {
+    const board=graph(s),key=s.pawns[0]*81+s.pawns[1];
+    return {board,key,walls:board.wallOptions?.get(key)};
+  }
+  function rememberWalls(options,walls) {
+    const cache=options.board.wallOptions||(options.board.wallOptions=new Map());
+    if(cache.size>=8&&!cache.has(options.key))cache.delete(cache.keys().next().value);
+    cache.set(options.key,walls);
+  }
+
   function successors(s) {
     if(s.winner!=null)return [];
     const result=pawnMoves(s).map(move=>({move,state:pawnChild(s,move.to)}));
-    if(s.remaining[s.turn]>0)for(let w=0;w<128;w++){
-      const child=wallChild(s,w);if(child)result.push({move:{type:'wall',wall:w},state:child});
+    if(s.remaining[s.turn]>0){
+      const options=wallOptions(s),walls=options.walls||[];
+      for(const w of options.walls||Array.from({length:128},(_,i)=>i)){
+        const child=wallChild(s,w,!!options.walls);
+        if(child){result.push({move:{type:'wall',wall:w},state:child});if(!options.walls)walls.push(w);}
+      }
+      if(!options.walls)rememberWalls(options,walls);
     }
     return result;
   }
 
   function moves(s) {
-    if (s.winner != null) return [];
+    if(s.winner!=null)return [];
     const result=pawnMoves(s);
-    if(s.remaining[s.turn]>0) for(let w=0;w<128;w++) if(legalWall(s,w)) result.push({type:'wall',wall:w});
+    if(s.remaining[s.turn]>0){
+      const options=wallOptions(s),walls=options.walls||[];
+      if(!options.walls){
+        for(let w=0;w<128;w++)if(legalWall(s,w))walls.push(w);
+        rememberWalls(options,walls);
+      }
+      for(const wall of walls)result.push({type:'wall',wall});
+    }
     return result;
   }
 
@@ -186,7 +243,7 @@
 
   const moveKey = m => m.type==='pawn' ? 'p'+m.to : 'w'+m.wall;
   const stateKey = s => [s.variant,s.turn,...s.pawns,...s.remaining,s.walls.join('.')].join(':');
-  const api={normalize,coords,wallCoords,goal,graph,pawnMoves,moves,successors,relevantWalls,apply,distances,path,turnDistance,moveKey,stateKey,clearCache:()=>graphCache.clear()};
+  const api={initDistanceMaps,normalize,coords,wallCoords,goal,graph,pawnMoves,moves,successors,relevantWalls,apply,distances,path,turnDistance,moveKey,stateKey,clearCache:()=>graphCache.clear()};
   root.WallzRules=api;
   if(typeof module!=='undefined') module.exports=api;
 })(globalThis);

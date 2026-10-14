@@ -1,6 +1,22 @@
 # Opponent-turn preparation: mechanism and game comparison
 
 The selected strategy remains **immediate-reply-first evaluation caching**.
+
+Version 0.8.1 evaluates up to four distinct queued positions per GPU batch instead
+of padding a batch with copies of one position. CPU-only preparation remains
+sequential. A cancelled batch retains completed evaluations and queued work for
+resumption; failed batches settle all requests before retrying unresolved work.
+Preparation still changes only evaluation caches and exact wall-proof caches,
+without adding speculative search visits.
+
+Eight paired measurements on this Windows PC, with two seconds of preparation,
+showed about 2.8 times as many prepared positions and roughly twice the foreground
+reuse. Four games against v0.8.0 at normal 3–6 second thinking limits, with
+preparation available to both engines, finished 2–2. This establishes a measured
+performance improvement, not a demonstrated win-rate increase. The ka epoch4225
+weights and foreground search settings remain unchanged.
+
+The comparisons below document earlier preparation experiments.
 We tested alternative schedulers and background Monte Carlo search. Corrected
 pondering finished **4 wins–4 losses in quick mode and 4–4 in normal mode**
 against the original extension. It did not demonstrate a strength gain that
@@ -14,8 +30,8 @@ conservative selection among tested approaches, not proof of global optimality.
 
 1. The overlay requests preparation on the opponent's turn and clears playable
    advice. The scheduler runs 500 ms slices while own-turn analysis has priority.
-2. Preparation evaluates the opponent position's neural policy/value, then every
-   legal immediate reply in policy order, before deeper work. An opening has 131
+2. Preparation evaluates the opponent position's neural policy/value, then queues
+   every legal immediate reply in policy order ahead of deeper work. An opening has 131
    legal replies, including 128 walls.
 3. A heap then visits likely continuations: top sixteen policy choices per
    expanded position, a ten-percent uniform probability mix and a depth penalty.
@@ -38,7 +54,7 @@ classical/exact logic and skip preparation. CPU/WebGPU calibration is unchanged.
 ## Confirmed improvements and counters
 
 The previous single global job restarted whenever the scheduler rotated tabs.
-Four recent exact-position jobs now retain their heap, current evaluation and
+Four recent exact-position jobs now retain their heap, current evaluations and
 progress. Returning refreshes recency; a fifth evicts the least recent job.
 Both evaluation caches remain independently bounded at 8192 entries. Tests cover
 resumption, eviction, cancellation, full immediate reply coverage, deeper work
@@ -55,9 +71,12 @@ and GPU allocations; RSS and ArrayBuffer changes are not treated as a saving.
 Repeat with `node --expose-gc scripts/preparation-memory.cjs ca87945` and
 `node --expose-gc scripts/preparation-memory.cjs` for the current source.
 
-A deterministic single-position comparison produced the identical sequence and
-counts across 200 model evaluations. The initial four-replies/one-continuation
-experimental ordering was reverted after its game result showed no improvement.
+A deterministic single-position comparison of the earlier sequential scheduler
+produced the identical sequence and counts across 200 model evaluations. The
+initial four-replies/one-continuation experimental ordering was reverted after
+its game result showed no improvement. Current GPU batches select up to four
+queued positions before scheduling their continuations, so their evaluation
+order can differ from that earlier sequential scheduler.
 
 Hover over **explored** after a neural decision to see prepared evaluations
 actually consumed and fresh model evaluations requested. Results expose

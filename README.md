@@ -44,7 +44,7 @@ To update, download a fresh copy, replace the extension files, click **Reload** 
 
 The extension reads the current board, checks legal moves and walls, and looks ahead at possible replies. A pretrained neural model helps evaluate positions and guide the search. During the opponent's turn it caches model evaluations for possible replies and likely continuations. When your turn begins, matching evaluations are reused within the normal thinking budget. See the [preparation audit](docs/performance/preparation-reuse.md) for the runtime path, measurements, and limits.
 
-The model is bundled with the extension. Analysis runs locally, without sending positions to an analysis server. There is no extension telemetry.
+The model is bundled with the extension. Analysis runs locally, without sending positions to an analysis server. There is no extension telemetry. A small bundled WebAssembly routine speeds up board distance calculations, with JavaScript as a fallback. Opponent-turn preparation fills available GPU batches with distinct positions.
 
 This private copy includes ka's epoch4225 model as the default evaluator. It adds board connectivity and legal wall placement features. The extension automatically uses four-position GPU batches when they match CPU results and improve throughput. Legal moves, win certificates, and the six-second maximum thinking budget remain separate from the model's estimates. The previous Sigma model remains available as a fallback if the ka files are missing or fail integrity checks.
 
@@ -91,6 +91,8 @@ npm run check
 ```
 
 Browser-check scripts additionally require Playwright and an installed Chromium browser.
+
+To rebuild `extension/distance.wasm` after editing `scripts/native/distance.c`, install Zig **0.13.0** and run `npm run build:distance`. Set `WALLZ_ZIG` to the compiler path if it isn't on your PATH. The compiled routine is already included; normal installation needs no compiler.
 
 ## Help and contributions
 
