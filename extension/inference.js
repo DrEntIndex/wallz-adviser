@@ -4,7 +4,7 @@
   const asset=path=>root.chrome?.runtime?.getURL?root.chrome.runtime.getURL(path):new URL(path,root.location.href).href;
   const R=root.WallzRules;
   const bundled={name:'sigma',count:136,input:'input',policy:'policy_logits',value:'value',dims:[1,8,9,9],valueDims:[1,1],encode:s=>root.WallzNeural.encode(s)};
-  let model=bundled,metadata=null,batchGpu=null,batchMs=null,batchSize=1,batchBusy=false,batchTimer=null;
+  let model=bundled,metadata=null,batchGpu=null,batchMs=null,batchSize=1,batchBusy=false,batchScheduled=false;
   const pendingBatch=[];let singleQueue=Promise.resolve(),gpuQueue=Promise.resolve();
  function encodeKa(state){
    const out=new Float32Array(1215),{edges}=R.graph(state),d=R.distances(state),directions=[1,3,0,2];
@@ -71,23 +71,33 @@
   }
 
   function runBatch(data){const work=gpuQueue.then(()=>{if(!batchGpu)throw new Error('Batch GPU unavailable');return batchGpu.run(data);});gpuQueue=work.catch(()=>{});return work;}
-  function packBatch(inputs){const length=inputs[0].length,out=new Float32Array(length*4);for(let i=0;i<4;i++)out.set(inputs[i%inputs.length],i*length);return out;}
+  function packBatch(inputs,size=batchSize){const length=inputs[0].length,out=new Float32Array(length*size);for(let i=0;i<size;i++)out.set(inputs[i%inputs.length],i*length);return out;}
   async function initBatch(inputs,references){
     if(model.name!=='ka'||!metadata?.batch||!root.ort.env.webgpu.adapter)return;
+    const configurations=[{...metadata.batch,file:'ka-batch.onnx'},...(Array.isArray(metadata.gpuBatches)?metadata.gpuBatches:[])];
+    for(const configuration of configurations)await tryBatch(configuration,inputs,references);
+  }
+  async function tryBatch(configuration,inputs,references){
     let candidate=null;
     try{
-      if(metadata.batch.size!==4||!/^[a-f0-9]{64}$/.test(metadata.batch.sha256))throw new Error('Invalid batch model metadata');
-      const response=await fetch(asset('models/ka-batch.onnx'));if(!response.ok)return;
+      const {size,file,sha256}=configuration;
+      if(![4,8,16].includes(size)||!/^ka-batch(?:8|16)?\.onnx$/.test(file)||!/^[a-f0-9]{64}$/.test(sha256))throw new Error('Invalid batch model metadata');
+      const response=await fetch(asset('models/'+file));if(!response.ok)return;
       const bytes=new Uint8Array(await response.arrayBuffer()),digest=Array.from(new Uint8Array(await root.crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
-      if(digest!==metadata.batch.sha256)throw new Error('Batch model integrity mismatch');
-      candidate=await makeGpu(bytes,4);const times=[];
+      if(digest!==sha256)throw new Error('Batch model integrity mismatch');
+      candidate=await makeGpu(bytes,size);const times=[];
       for(let i=0;i<7;i++){
-        const order=i&1?[1,0,0,1]:[0,1,1,0],start=performance.now(),answers=await candidate.run(packBatch(order.map(index=>inputs[index])));
+        const order=Array.from({length:size},(_,j)=>(j^(j>>1)^i)&1),start=performance.now(),answers=await candidate.run(packBatch(order.map(index=>inputs[index]),size));
         if(i>=3)times.push(performance.now()-start);
-        for(let j=0;j<4;j++){const answer=answers[j],reference=references[order[j]];if(Math.abs(answer.value-reference.value)>.002||answer.logits.some((v,k)=>Math.abs(v-reference.logits[k])>.002))throw new Error('Batch evaluation disagrees with CPU '+JSON.stringify({i,j,value:answer.value,referenceValue:reference.value,policyError:Math.max(...answer.logits.map((v,k)=>Math.abs(v-reference.logits[k])))}));}
+        for(let j=0;j<size;j++){const answer=answers[j],reference=references[order[j]];if(Math.abs(answer.value-reference.value)>.002||answer.logits.some((v,k)=>Math.abs(v-reference.logits[k])>.002))throw new Error('Batch evaluation disagrees with CPU '+JSON.stringify({i,j,value:answer.value,referenceValue:reference.value,policyError:Math.max(...answer.logits.map((v,k)=>Math.abs(v-reference.logits[k])))}));}
       }
       const measured=median(times);
-      if(measured/4<timingMs*.8){batchGpu=candidate;batchMs=measured;batchSize=4;gpuMs=measured;if(measured<cpuMs*.85){backend='webgpu';timingMs=measured;}candidate=null;}
+      const threshold=batchGpu?batchMs/batchSize*.85:cpuMs*.8;
+      if(measured/size<threshold){
+        const previous=batchGpu;batchGpu=candidate;batchMs=measured;batchSize=size;gpuMs=measured;
+        backend=measured<cpuMs*.85?'webgpu':'wasm';timingMs=backend==='webgpu'?measured:cpuMs;candidate=null;
+        if(previous)await previous.release().catch(()=>{});
+      }
     }catch(error){failure=String(error.message||error);}
     finally{if(candidate)await candidate.release().catch(()=>{});}
   }
@@ -145,24 +155,32 @@
     const logits=new Float32Array(136).fill(-100);for(let i=0;i<moves.length;i++)logits[root.WallzNeural.policyIndex(state,moves[i])]=Math.log(probabilities[i]);
     return {logits,value:answer.value*(state.turn===0?1:-1)};
   }
+  function scheduleBatch(){
+    if(batchScheduled||batchBusy||!pendingBatch.length)return;
+    batchScheduled=true;
+    // Sibling leaf evaluations reach the queue in the same microtask turn.
+    // A timer here acquires the browser's nested-timer delay on partial batches,
+    // leaving Metal idle for longer than the inference itself takes.
+    Promise.resolve().then(()=>{batchScheduled=false;return drainBatch();});
+  }
   async function drainBatch(){
-    clearTimeout(batchTimer);batchTimer=null;if(batchBusy)return;
-    const work=pendingBatch.splice(0,4);if(!work.length)return;batchBusy=true;
+    if(batchBusy)return;
+    const work=pendingBatch.splice(0,batchSize);if(!work.length)return;batchBusy=true;
     try{
       let answers;
       if(batchGpu){try{const start=performance.now();answers=await runBatch(packBatch(work.map(w=>model.encode(w.state))));batchMs=batchMs*.9+(performance.now()-start)*.1;}catch(error){failure=String(error.message||error);const failed=batchGpu;batchGpu=null;batchSize=1;if(!gpu)backend='wasm';if(failed)await failed.release().catch(()=>{});}}
       if(answers)work.forEach((w,i)=>w.resolve(decode(w.state,answers[i])));
       else for(const item of work)item.resolve(await evaluateState(item.state));
     }catch(error){for(const item of work)item.reject(error);}
-    finally{batchBusy=false;if(pendingBatch.length)batchTimer=setTimeout(drainBatch,0);}
+    finally{batchBusy=false;scheduleBatch();}
   }
   async function evaluateStateBatched(state){
     await init();if(!batchGpu)return evaluateState(state);
-    return new Promise((resolve,reject)=>{pendingBatch.push({state,resolve,reject});if(pendingBatch.length>=4&&!batchBusy)drainBatch();else if(!batchTimer)batchTimer=setTimeout(drainBatch,0);});
+    return new Promise((resolve,reject)=>{pendingBatch.push({state,resolve,reject});if(pendingBatch.length>=batchSize&&!batchBusy)drainBatch();else scheduleBatch();});
   }
   async function evaluateState(state){
     await init();const answer=await evaluate(model.encode(state));
     return decode(state,answer);
   }
-  root.WallzInference={init,evaluate,evaluateState,evaluateStateBatched,info:()=>({model:model.name,backend:batchGpu?'webgpu':backend,inferenceMs:batchGpu?batchMs/4:timingMs,singleInferenceMs:timingMs,batchSize,batchMs,cpuMs,gpuMs,threads,cores:root.navigator?.hardwareConcurrency||1,failure})};
+  root.WallzInference={init,evaluate,evaluateState,evaluateStateBatched,info:()=>({model:model.name,backend:batchGpu?'webgpu':backend,singleBackend:backend,inferenceMs:batchGpu?batchMs/batchSize:timingMs,singleInferenceMs:timingMs,batchSize,batchMs,cpuMs,gpuMs,threads,cores:root.navigator?.hardwareConcurrency||1,failure})};
 })(globalThis);

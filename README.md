@@ -46,7 +46,7 @@ The extension reads the current board, checks legal moves and walls, and looks a
 
 The model is bundled with the extension. Analysis runs locally, without sending positions to an analysis server. There is no extension telemetry. A small bundled WebAssembly routine speeds up board distance calculations, with JavaScript as a fallback. Opponent-turn preparation fills available GPU batches with distinct positions.
 
-This private copy includes ka's epoch4225 model as the default evaluator. It adds board connectivity and legal wall placement features. The extension automatically uses four-position GPU batches when they match CPU results and improve throughput. Legal moves, win certificates, and the six-second maximum thinking budget remain separate from the model's estimates. The previous Sigma model remains available as a fallback if the ka files are missing or fail integrity checks.
+This private copy includes ka's epoch4225 model as the default evaluator. It adds board connectivity and legal wall placement features. The extension compares four- and eight-position GPU batches against CPU results and measured throughput, choosing the larger batch only when it is sufficiently faster. This improves Apple Silicon GPU utilization without changing the learned weights. Legal moves, win certificates, and the six-second maximum thinking budget remain separate from the model's estimates. The previous Sigma model remains available as a fallback if the ka files are missing or fail integrity checks.
 
 Suggestions are estimates, not guaranteed wins. Wallz updates can change how the board is read; if the extension stops recognizing it, the reader may need an update.
 
@@ -91,6 +91,10 @@ npm run check
 ```
 
 Browser-check scripts additionally require Playwright and an installed Chromium browser.
+
+For complete-version Apple Silicon speed comparisons and offline, side-swapped matches, see [the comparison guide](docs/performance/apple-silicon.md). Local baseline snapshots live in `work/` and generated measurements in `outputs/`; both are ignored by Git.
+
+The [recorded eight-position candidate validation](docs/performance/eight-position-candidate-validation.md) found 39% more actual search work on the tested Mac. Only four normal-budget games finished (three wins, one loss); playing strength and non-regression remain unproven.
 
 To rebuild `extension/distance.wasm` after editing `scripts/native/distance.c`, install Zig **0.13.0** and run `npm run build:distance`. Set `WALLZ_ZIG` to the compiler path if it isn't on your PATH. The compiled routine is already included; normal installation needs no compiler.
 

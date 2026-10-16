@@ -380,7 +380,7 @@
     preparations.delete(key);preparations.set(key,job);
     let lastYield=start,lastProgress=start;options.onProgress?.({nodes:job.visited,phase:'prepare'});
     await init();
-    const batchSize=Math.min(4,Math.max(1,Math.floor(Number(root.WallzInference.info?.()?.batchSize)||1)));
+    const batchSize=Math.min(16,Math.max(1,Math.floor(Number(root.WallzInference.info?.()?.batchSize)||1)));
     while(!expired()&&job.visited<8192&&(job.current?.length||job.queue.length)){
       if(performance.now()-lastYield>=16){await new Promise(resolve=>setTimeout(resolve,0));lastYield=performance.now();if(expired())break;}
       if(!job.current?.length){

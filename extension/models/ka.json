@@ -7,5 +7,12 @@
   "batch": {
     "size": 4,
     "sha256": "41472e3efe0573a90a2855727d6292bb4742bfebd140709619fd4617d304a611"
-  }
+  },
+  "gpuBatches": [
+    {
+      "size": 8,
+      "file": "ka-batch8.onnx",
+      "sha256": "3c17211ebbd207911a0b5be29da28f8226186591adf67fb4e697d0642ac0dee2"
+    }
+  ]
 }

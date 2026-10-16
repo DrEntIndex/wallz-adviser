@@ -26,4 +26,10 @@ for(const [name,hash] of Object.entries(resources)){
   const actual=createHash('sha256').update(fs.readFileSync(path.join(root,'extension',name))).digest('hex');
   if(actual!==hash)throw new Error('Model/runtime integrity mismatch: '+name);
 }
+const ka=JSON.parse(fs.readFileSync(path.join(root,'extension/models/ka.json'),'utf8'));
+for(const model of [{file:'ka.onnx',sha256:ka.sha256},{file:'ka-batch.onnx',...ka.batch},...(ka.gpuBatches||[])]){
+  if(!/^ka(?:-batch(?:8|16)?)?\.onnx$/.test(model.file)||!/^[a-f0-9]{64}$/.test(model.sha256))throw Error('Invalid ka model metadata');
+  const actual=createHash('sha256').update(fs.readFileSync(path.join(root,'extension/models',model.file))).digest('hex');
+  if(actual!==model.sha256)throw Error('ka model integrity mismatch: '+model.file);
+}
 console.log('Syntax, manifest resources and minimal permissions: PASS');

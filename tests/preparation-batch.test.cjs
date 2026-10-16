@@ -5,13 +5,22 @@ const fs=require('node:fs');
 const path=require('node:path');
 const R=require('../extension/rules.js');
 const initial=()=>({pawns:[4,76],walls:[],remaining:[10,10],turn:0,winner:null,variant:'classic'});
-function fixture(evaluate){
+function fixture(evaluate,batchSize=4){
   const context=vm.createContext({WallzRules:R,WallzEngine:{},console,performance,setTimeout,clearTimeout});
-  context.WallzInference={init:async()=>{},info:()=>({model:'ka',batchSize:4}),evaluateState:()=>{throw new Error('Scalar inference used during batch preparation');},evaluateStateBatched:evaluate};
+  context.WallzInference={init:async()=>{},info:()=>({model:'ka',batchSize}),evaluateState:()=>{throw new Error('Scalar inference used during batch preparation');},evaluateStateBatched:evaluate};
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/neural.js'),'utf8'),context);
   return context.WallzNeural;
 }
 const answer=()=>({logits:new Float32Array(136),value:0});
+test('preparation fills the selected eight-position batch with distinct leaves',async()=>{
+ let calls=0,active=0,peak=0,stop=false;const seen=new Set();
+ const N=fixture(async state=>{
+  const key=R.stateKey(state);assert.ok(!seen.has(key));seen.add(key);calls++;active++;peak=Math.max(peak,active);
+  if(calls>=9)stop=true;await new Promise(resolve=>setTimeout(resolve,2));active--;return answer();
+ },8);
+ const result=await N.prepare(initial(),{budgetMs:1000,shouldStop:()=>stop});
+ assert.equal(peak,8);assert.equal(active,0);assert.equal(result.visited,calls);assert.equal(result.stopped,true);
+});
 test('preparation batches distinct positions and awaits all active evaluations on cancellation',async()=>{
   let calls=0,active=0,peak=0,stop=false;
   const seen=new Set();

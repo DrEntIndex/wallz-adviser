@@ -1,3 +1,4 @@
+# Local baselines, development environments and generated comparison reports.
 work/
 node_modules/
 *.zip
